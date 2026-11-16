@@ -28,7 +28,7 @@ const BASE = 'http://127.0.0.1:8787/index.html';
           bodies.push(JSON.parse(payload));
           turn++;
           const text = turn === 1
-            ? '冰岛人口大约 39.4 万，数据来自统计局 2026 年初的估算。\n```xi-search\n冰岛人口\n```'
+            ? '冰岛人口大约 39.4 万，数据来自统计局 2026 年初的估算。'
             : (turn === 2
               ? '我去搜一下，稍等。\n```xi-search\n冰岛人口\n```'
               : '能，服务端在搜，直接问我哪种就行。');

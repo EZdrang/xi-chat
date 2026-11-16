@@ -1109,6 +1109,46 @@
     return el;
   }
 
+  /* 联网自检：拿真实的接口跑一次，把她到底能不能搜、报什么错，全摊给你看 */
+  async function selfCheck() {
+    var model = (S.searchMode === 'native') ? (S.searchModel || 'deepseek-flash') : S.model;
+    var lines = [
+      '接口：' + (S.baseUrl || ''),
+      '模型：' + model,
+      '搜索：' + (S.searchMode || 'off'),
+    ];
+    dialog('联网自检', '正在发一次真请求…', '好');
+    try {
+      var body = {
+        model: model,
+        messages: [{ role: 'user', content: '现在北京时间的日期和大致时间是多少？不知道就说不知道。' }],
+        stream: false,
+      };
+      if (S.searchMode === 'native') {
+        body.tools = [
+          { type: 'deepseek_web_search', name: 'deepseek_web_search' },
+          { type: 'deepseek_read_url', name: 'deepseek_read_url' },
+        ];
+      }
+      var j = await postJSON(joinUrl('/chat/completions'), body);
+      var msg = j && j.choices && j.choices[0] && j.choices[0].message;
+      var txt = (msg && msg.content) || JSON.stringify(j).slice(0, 400);
+      var toolUse = j && j.usage && j.usage.server_tool_use;
+      lines.push('结果：成功');
+      if (toolUse) {
+        lines.push('服务端搜索次数：' + JSON.stringify(toolUse));
+      } else if (S.searchMode === 'native') {
+        lines.push('⚠ 没看到服务端搜索记录：这个接口可能没真正支持 deepseek_web_search（中转站常见）');
+      }
+      lines.push('回复：' + String(txt).slice(0, 260));
+      dialog('联网自检', esc(lines.join('\n')), '好');
+    } catch (e) {
+      lines.push('结果：失败');
+      lines.push('错误：' + String((e && e.message) || e).slice(0, 300));
+      dialog('联网自检', esc(lines.join('\n')), '好');
+    }
+  }
+
   function renderSessions() {
     var box = $('sessions');
     box.innerHTML = '';
@@ -1965,11 +2005,11 @@
             // 只有本地搜索开着时才走回环；内置联网由服务端处理，别在这儿空转
             if (S.searchMode === 'custom' || S.searchMode === 'duck') {
               pendingSearch = sd.kw;
-            } else if (msg.content.replace(/\s/g, '').length < 12) {
-              // 她把话说完就等结果了——别让她干等，补一句接着答
+            } else {
+              // 内置/关闭模式下她不该发这个块；无论如何都要把她推回来把话说完
               pendingHint = S.searchMode === 'native'
-                ? '服务端已经开了联网，你直接回答就会带引用，不需要任何搜索指令。现在接着答，别让指挥官干等。'
-                : '这台机器没开联网，你搜不了。直接说搜不了，或者凭记忆回答。';
+                ? '不要发搜索指令——服务端已经开了联网，你直接回答就会带引用。现在立刻把答案说完。'
+                : '这台机器没开联网。直接说搜不了，或者凭记忆回答，别等。';
             }
           }
           var fd = extractFindDirective(msg.content);
@@ -2666,6 +2706,7 @@
         toast('手机端才能授权', 2000);
       }
     });
+    $('btnSelfCheck').addEventListener('click', selfCheck);
     $('btnMenu').addEventListener('click', openDrawer);
     $('scrim').addEventListener('click', closeDrawer);
     $('btnNew').addEventListener('click', function () { closeDrawer(); newSession(); });

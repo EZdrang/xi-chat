@@ -54,6 +54,7 @@
   var streamCtx = null;
   var pendingFind = '';
   var pendingSearch = '';
+  var pendingCtx = false;
   var renderLimits = {};   // 会话 id → 渲染多少条（长会话懒加载）
   var pendingReq = {};    // id -> handlers
   var reqSeq = 0;
@@ -733,6 +734,26 @@
     await runChat(sess);
   }
 
+  /* 她说「我需要知道现在的处境」时，App 去读一次设备再回给她 */
+  function extractContextDirective(text) {
+    var m = text.match(/```xi-context\s*\n?([\s\S]*?)```/);
+    if (!m) return { text: text, want: false };
+    return { text: text.replace(m[0], '').trim(), want: true };
+  }
+
+  async function continueWithContext(sess) {
+    refreshEnv();
+    var line = envLine();
+    sess.messages.push({
+      role: 'system', hidden: true,
+      content: line
+        ? '【此刻的处境】\n' + line + '\n按这个说实话，别编时间地点。'
+        : '【此刻的处境】拿不到设备信息（没授权或读取失败），如实说不知道。',
+    });
+    await saveCur();
+    await runChat(sess);
+  }
+
   /* 从回复里捞「查一下」指令块 */
   function extractSearchDirective(text) {
     var m = text.match(/```xi-search\s*\n([\s\S]*?)```/);
@@ -967,6 +988,13 @@
 
   /* 此刻的处境：时间、电量、网络、位置——让她知道你在哪、几点、什么状态 */
   var ENV = null;
+  var injectEnv = false;   // 只在这一轮需要时才把处境塞进去
+
+  /* 这句话是不是在问时间/位置/身体状态——是才去读传感器 */
+  function wantsContext(text) {
+    if (!text) return false;
+    return /几点|什么时候|现在.*(了|吗)|时间|在哪|位置|哪儿|几点睡|没睡|熬夜|步数|走了|电量|充电|电池|屏幕|用了多久|多久没/.test(text);
+  }
 
   function refreshEnv() {
     try {
@@ -1721,7 +1749,7 @@
     if (sess.summary) {
       out.push({ role: 'system', content: '【早前对话的压缩摘要】\n' + sess.summary });
     }
-    if (S.envOn !== false) {
+    if (S.envOn !== false && injectEnv) {
       var el = envLine();
       if (el) out.push({ role: 'system', content: el });
     }
@@ -1786,7 +1814,8 @@
     busy = true;
     aborted = false;
     setSendState('stop');
-    refreshEnv();
+    injectEnv = S.envOn !== false && wantsContext(d.text);
+    if (injectEnv) refreshEnv();
     await saveCur();
     updateCtx();
 
@@ -1795,9 +1824,12 @@
       if (S.compress) await maybeCompress();
       await runChat(sess);
       var hops = 0;
-      while (hops < 2 && (pendingSearch || pendingFind)) {
+      while (hops < 2 && (pendingSearch || pendingFind || pendingCtx)) {
         hops++;
-        if (pendingSearch) {
+        if (pendingCtx) {
+          pendingCtx = false;
+          await continueWithContext(sess);
+        } else if (pendingSearch) {
           var q = pendingSearch;
           pendingSearch = '';
           await continueWithWebSearch(sess, q);
@@ -1894,7 +1926,13 @@
         var memBlocks = [];
         pendingFind = '';
         pendingSearch = '';
+        pendingCtx = false;
         if (msg.content) {
+          var cd = extractContextDirective(msg.content);
+          if (cd.want) {
+            msg.content = cd.text;
+            pendingCtx = true;
+          }
           var sd = extractSearchDirective(msg.content);
           if (sd.kw) {
             msg.content = sd.text;

@@ -27,7 +27,7 @@
     theme: 'auto',
     visionModel: '',
     imgMode: 'original',
-    searchMode: 'off',
+    searchMode: 'native',
     searchModel: 'deepseek-flash',
     searchUrl: '',
     searchKey: '',
@@ -1677,11 +1677,47 @@
     window.XiNative.pickAttachBridge(id, kind, S.imgMode || 'original');
   }
 
+  /* 不是 JPEG/PNG/WebP/GIF 的图（HEIC、BMP…）转一次码，尺寸保持原样 */
+  function toJpegDataUrl(dataUrl) {
+    return new Promise(function (resolve, reject) {
+      var img = new Image();
+      img.onload = function () {
+        try {
+          var c = document.createElement('canvas');
+          c.width = img.naturalWidth || img.width;
+          c.height = img.naturalHeight || img.height;
+          var g = c.getContext('2d');
+          g.fillStyle = '#fff';
+          g.fillRect(0, 0, c.width, c.height);
+          g.drawImage(img, 0, 0);
+          resolve(c.toDataURL('image/jpeg', 0.92));
+        } catch (e) {
+          reject(e);
+        }
+      };
+      img.onerror = function () { reject(new Error('这张图解码不了')); };
+      img.src = dataUrl;
+    });
+  }
+
   async function addAttachment(id, name, mime, b64, size) {
     var isImg = /^image\//i.test(mime || '') || IMG_EXT.test(name);
 
     if (isImg) {
-      var url = 'data:' + (mime || 'image/jpeg') + ';base64,' + b64;
+      // mime 可能缺失（从「文件」入口选图时常见），先按扩展名兜底
+      var m = String(mime || '').toLowerCase();
+      if (!/^image\//.test(m)) m = mimeOf(name);
+      if (!/^image\//.test(m)) m = 'image/jpeg';
+
+      var url = 'data:' + m + ';base64,' + b64;
+      if (!/^image\/(jpeg|jpg|png|webp|gif)$/.test(m)) {
+        try {
+          url = await toJpegDataUrl(url);
+        } catch (e) {
+          toast('这张图格式不支持，已跳过：' + name, 2800);
+          return;
+        }
+      }
       ATTS.push({ id: id, kind: 'image', name: name, preview: url, dataUrl: url, size: size });
       renderAtts();
       maybeWarnVision();
@@ -2381,10 +2417,7 @@
     $('fTheme').value = S.theme || 'auto';
     $('fVisionModel').value = S.visionModel || '';
     $('fImgMode').value = S.imgMode || 'original';
-    $('fSearchMode').value = S.searchMode || 'off';
-    $('fSearchModel').value = S.searchModel || 'deepseek-flash';
-    $('fSearchUrl').value = S.searchUrl || '';
-    $('fSearchKey').value = S.searchKey || '';
+    $('fSearchMode').value = S.searchMode === 'off' ? 'off' : 'native';
     $('fEnvOn').checked = S.envOn !== false;
     refreshEnv();
     var parts = [];
@@ -2414,10 +2447,8 @@
     S.theme = $('fTheme').value || 'auto';
     S.visionModel = $('fVisionModel').value.trim();
     S.imgMode = $('fImgMode').value || 'original';
-    S.searchMode = $('fSearchMode').value || 'off';
-    S.searchModel = $('fSearchModel').value.trim() || 'deepseek-flash';
-    S.searchUrl = $('fSearchUrl').value.trim();
-    S.searchKey = $('fSearchKey').value.trim();
+    S.searchMode = $('fSearchMode').value || 'native';
+    S.searchModel = 'deepseek-flash';
     S.envOn = $('fEnvOn').checked;
     applyTheme();
     saveSettings();
@@ -2873,6 +2904,8 @@
   async function bootInner() {
     MEM.init();
     S = loadSettings();
+    // 旧版本留下的 duck / custom 统一归到内置；只保留「关闭」
+    if (S.searchMode !== 'off') S.searchMode = 'native';
     applyTheme();
     renderPresets();
     fillSettings();

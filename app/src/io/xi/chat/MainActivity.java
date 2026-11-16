@@ -54,11 +54,14 @@ public class MainActivity extends Activity {
     private static final int REQ_VOICE = 4202;
     private static final int REQ_REC_PERM = 4203;
     private static final int REQ_PICK_IMAGES = 4204;
+    private static final int REQ_PICK_ATTACH = 4205;
 
     /** 超过这个大小就不把内容过桥，只带文件名（否则 base64 会把 WebView 撑爆） */
     private static final int MAX_BRIDGE_BYTES = 3 * 1024 * 1024;
+    private static final int MAX_ATTACH_BYTES = 25 * 1024 * 1024;
+    private static final int CHUNK = 192 * 1024;
     private static final int MAX_IMG_SIDE = 1280;
-    private static final int MAX_PICK_IMAGES = 6;
+    private static final int MAX_PICK_IMAGES = 20;
     private WebView web;
     private Bridge bridge;
     private String pickId;
@@ -67,6 +70,7 @@ public class MainActivity extends Activity {
     private File recFile;
     private String recId;
     private String pendingRecId;
+    private String pickMode;
     private final Handler ui = new Handler(Looper.getMainLooper());
 
     @Override
@@ -292,29 +296,6 @@ public class MainActivity extends Activity {
     // ------------------------------------------------------------------
     // File picking
     // ------------------------------------------------------------------
-    /** 多选图片：相册里挑，Java 端先缩到 1280 再传，避免大图爆桥 */
-    void pickImages(String id) {
-        pickId = id;
-        Intent i;
-        if (Build.VERSION.SDK_INT >= 33) {
-            i = new Intent(android.provider.MediaStore.ACTION_PICK_IMAGES);
-            i.setType("image/*");
-            i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
-            i.putExtra(android.provider.MediaStore.EXTRA_PICK_IMAGES_MAX, MAX_PICK_IMAGES);
-        } else {
-            i = new Intent(Intent.ACTION_GET_CONTENT);
-            i.setType("image/*");
-            i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
-            i.addCategory(Intent.CATEGORY_OPENABLE);
-            i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        }
-        try {
-            startActivityForResult(i, REQ_PICK_IMAGES);
-        } catch (Exception e) {
-            emit("window.__xiPickCancelled(" + JSONObject.quote(id) + ")");
-        }
-    }
-
     private String imageB64(Uri uri) throws Exception {
         BitmapFactory.Options bounds = new BitmapFactory.Options();
         bounds.inJustDecodeBounds = true;
@@ -345,6 +326,132 @@ public class MainActivity extends Activity {
         bmp.compress(Bitmap.CompressFormat.JPEG, 82, bo);
         bmp.recycle();
         return Base64.encodeToString(bo.toByteArray(), Base64.NO_WRAP);
+    }
+
+    /** 分块过桥：一次性把大文件塞进 evaluateJavascript 会把 WebView 撑爆 */
+    private void emitFileChunkedB64(String id, String name, String mime, String b64, int size) {
+        int total = (b64.length() + CHUNK - 1) / CHUNK;
+        if (total <= 0) total = 1;
+        emit("window.__xiFileStart(" + JSONObject.quote(id) + "," + JSONObject.quote(name) + ","
+                + JSONObject.quote(mime) + "," + total + "," + size + ");");
+        for (int i = 0; i < total; i++) {
+            int s = i * CHUNK;
+            int e = Math.min(b64.length(), s + CHUNK);
+            emit("window.__xiFileChunk(" + JSONObject.quote(id) + "," + i + ","
+                    + JSONObject.quote(b64.substring(s, e)) + ");");
+        }
+        emit("window.__xiFileEnd(" + JSONObject.quote(id) + ");");
+    }
+
+    private void emitFileChunked(String id, String name, String mime, byte[] bytes) {
+        emitFileChunkedB64(id, name, mime, Base64.encodeToString(bytes, Base64.NO_WRAP), bytes.length);
+    }
+
+    private void emitFileMeta(String id, String name, long size) {
+        emit("window.__xiFileMeta(" + JSONObject.quote(id) + "," + JSONObject.quote(name)
+                + "," + size + ");");
+    }
+
+    /** 聊天附件：图片可多选，文件单个；mode=original 时图片不压缩 */
+    void pickAttach(String id, String kind, String mode) {
+        pickId = id;
+        pickMode = mode;
+        Intent i;
+        if ("image".equals(kind)) {
+            if (Build.VERSION.SDK_INT >= 33) {
+                i = new Intent(android.provider.MediaStore.ACTION_PICK_IMAGES);
+                i.setType("image/*");
+                i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+                i.putExtra(android.provider.MediaStore.EXTRA_PICK_IMAGES_MAX, MAX_PICK_IMAGES);
+            } else {
+                i = new Intent(Intent.ACTION_GET_CONTENT);
+                i.setType("image/*");
+                i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+                i.addCategory(Intent.CATEGORY_OPENABLE);
+                i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            }
+            try {
+                startActivityForResult(i, REQ_PICK_IMAGES);
+            } catch (Exception e) {
+                emit("window.__xiPickCancelled(" + JSONObject.quote(id) + ")");
+            }
+            return;
+        }
+        i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("*/*");
+        try {
+            startActivityForResult(i, REQ_PICK_ATTACH);
+        } catch (Exception e) {
+            emit("window.__xiPickCancelled(" + JSONObject.quote(id) + ")");
+        }
+    }
+
+    private void handleImagesResult(String iid, int res, Intent data) {
+        if (res != RESULT_OK || data == null) {
+            emit("window.__xiPickCancelled(" + JSONObject.quote(iid) + ")");
+            return;
+        }
+        final ArrayList<Uri> uris = new ArrayList<>();
+        if (data.getClipData() != null) {
+            int n = Math.min(data.getClipData().getItemCount(), MAX_PICK_IMAGES);
+            for (int k = 0; k < n; k++) uris.add(data.getClipData().getItemAt(k).getUri());
+        } else if (data.getData() != null) {
+            uris.add(data.getData());
+        }
+        if (uris.isEmpty()) {
+            emit("window.__xiPickCancelled(" + JSONObject.quote(iid) + ")");
+            return;
+        }
+        final boolean compact = "compact".equals(pickMode);
+        new Thread(() -> {
+            for (int i = 0; i < uris.size(); i++) {
+                Uri u = uris.get(i);
+                String subId = iid + "#" + i;
+                String nm = withExt(queryName(u), getContentResolver().getType(u));
+                try {
+                    if (compact) {
+                        String b64 = imageB64(u);
+                        emitFileChunkedB64(subId, nm, "image/jpeg", b64, b64.length());
+                    } else {
+                        byte[] bytes = readBytes(getContentResolver().openInputStream(u));
+                        if (bytes.length > MAX_ATTACH_BYTES) {
+                            emitFileMeta(subId, nm, bytes.length);
+                        } else {
+                            String mime = getContentResolver().getType(u);
+                            emitFileChunked(subId, nm,
+                                    mime == null ? "image/jpeg" : mime, bytes);
+                        }
+                    }
+                } catch (Exception e) {
+                    emit("window.__xiPickError(" + JSONObject.quote(subId) + ","
+                            + JSONObject.quote(String.valueOf(e.getMessage())) + ");");
+                }
+            }
+        }).start();
+    }
+
+    private void handleAttachResult(String aid, int res, Intent data) {
+        if (res != RESULT_OK || data == null || data.getData() == null) {
+            emit("window.__xiPickCancelled(" + JSONObject.quote(aid) + ")");
+            return;
+        }
+        final Uri u = data.getData();
+        final String nm = withExt(queryName(u), getContentResolver().getType(u));
+        new Thread(() -> {
+            try {
+                byte[] bytes = readBytes(getContentResolver().openInputStream(u));
+                if (bytes.length > MAX_ATTACH_BYTES) {
+                    emitFileMeta(aid, nm, bytes.length);
+                    return;
+                }
+                String mime = getContentResolver().getType(u);
+                emitFileChunked(aid, nm, mime == null ? "application/octet-stream" : mime, bytes);
+            } catch (Exception e) {
+                emit("window.__xiPickError(" + JSONObject.quote(aid) + ","
+                        + JSONObject.quote(String.valueOf(e.getMessage())) + ");");
+            }
+        }).start();
     }
 
     void pickFile(String id, String mime) {
@@ -392,39 +499,15 @@ public class MainActivity extends Activity {
             return;
         }
         if (req == REQ_PICK_IMAGES) {
-            final String iid = pickId;
+            String iid = pickId;
             pickId = null;
-            if (res != RESULT_OK || data == null) {
-                emit("window.__xiPickCancelled(" + JSONObject.quote(iid) + ")");
-                return;
-            }
-            final ArrayList<Uri> uris = new ArrayList<>();
-            if (data.getClipData() != null) {
-                int n = Math.min(data.getClipData().getItemCount(), MAX_PICK_IMAGES);
-                for (int k = 0; k < n; k++) uris.add(data.getClipData().getItemAt(k).getUri());
-            } else if (data.getData() != null) {
-                uris.add(data.getData());
-            }
-            if (uris.isEmpty()) {
-                emit("window.__xiPickCancelled(" + JSONObject.quote(iid) + ")");
-                return;
-            }
-            new Thread(() -> {
-                try {
-                    org.json.JSONArray arr = new org.json.JSONArray();
-                    for (Uri u : uris) {
-                        org.json.JSONObject o = new org.json.JSONObject();
-                        o.put("name", withExt(queryName(u), "image/jpeg"));
-                        o.put("b64", imageB64(u));
-                        arr.put(o);
-                    }
-                    emit("window.__xiImagesPicked(" + JSONObject.quote(iid) + ","
-                            + JSONObject.quote(arr.toString()) + ");");
-                } catch (Exception e) {
-                    emit("window.__xiPickError(" + JSONObject.quote(iid) + ","
-                            + JSONObject.quote(String.valueOf(e.getMessage())) + ");");
-                }
-            }).start();
+            handleImagesResult(iid, res, data);
+            return;
+        }
+        if (req == REQ_PICK_ATTACH) {
+            String aid = pickId;
+            pickId = null;
+            handleAttachResult(aid, res, data);
             return;
         }
         if (req != REQ_PICK) {
@@ -670,8 +753,8 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
-        public void pickImagesBridge(String id) {
-            MainActivity.this.pickImages(id);
+        public void pickAttachBridge(String id, String kind, String mode) {
+            MainActivity.this.pickAttach(id, kind, mode);
         }
 
         @JavascriptInterface

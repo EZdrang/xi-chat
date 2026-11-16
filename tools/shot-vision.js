@@ -34,7 +34,7 @@ const BASE = 'http://127.0.0.1:8787/index.html';
           window.__xiNet(id, { t: 'd' });
         }, 20);
       },
-      pickImagesBridge(id) { pickId = id; },
+      pickAttachBridge(id) { pickId = id; },
       pickFileBridge(id) { pickId = id; },
       saveDownload() { }, env() { return '{}'; }, toast() { },
     };
@@ -44,11 +44,13 @@ const BASE = 'http://127.0.0.1:8787/index.html';
     S.model = 'deepseek-chat';
     S.visionModel = 'gpt-4o-mini';
 
-    // 选一张图
+    // 选一张图（分块投递）
     document.getElementById('btnPickImage').click();
     await new Promise((r) => setTimeout(r, 60));
-    window.__xiImagesPicked(pickId, JSON.stringify([{ name: 'shot.jpg', b64 }]));
-    await new Promise((r) => setTimeout(r, 200));
+    window.__xiFileStart(pickId, 'shot.jpg', 'image/jpeg', 1, b64.length);
+    window.__xiFileChunk(pickId, 0, b64);
+    window.__xiFileEnd(pickId);
+    await new Promise((r) => setTimeout(r, 300));
 
     // 发出去
     document.getElementById('input').value = '这张图什么内容';

@@ -26,6 +26,7 @@
     asrModel: 'whisper-1',
     theme: 'auto',
     visionModel: '',
+    imgMode: 'original',
   };
 
   var PRESETS = [
@@ -1170,27 +1171,9 @@
     return (m && map[m[1]]) || 'application/octet-stream';
   }
 
-  function shrinkImage(dataUrl, max, q) {
-    return new Promise(function (resolve) {
-      var img = new Image();
-      img.onload = function () {
-        try {
-          var w = img.width, h = img.height;
-          var s = Math.min(1, max / Math.max(w, h));
-          var c = document.createElement('canvas');
-          c.width = Math.round(w * s);
-          c.height = Math.round(h * s);
-          var ctx = c.getContext('2d');
-          ctx.fillStyle = '#ffffff';
-          ctx.fillRect(0, 0, c.width, c.height);
-          ctx.drawImage(img, 0, 0, c.width, c.height);
-          resolve(c.toDataURL('image/jpeg', q));
-        } catch (e) { resolve(dataUrl); }
-      };
-      img.onerror = function () { resolve(dataUrl); };
-      img.src = dataUrl;
-    });
-  }
+  /* ── 附件：分块过桥，大文件不再闪退 ── */
+
+  var FILEQ = {};
 
   function renderAtts() {
     var bar = $('attachBar');
@@ -1200,49 +1183,103 @@
     ATTS.forEach(function (a) {
       var chip = document.createElement('div');
       chip.className = 'chip';
-      chip.innerHTML = (a.kind === 'image' && a.preview
-          ? '<img src="' + a.preview + '" alt="">'
-          : '<span class="ci">📎</span>') +
+      var head = (a.kind === 'image' && a.preview)
+        ? '<img src="' + a.preview + '" alt="">'
+        : '<span class="ci">' + (a.entries ? '🗂' : '📎') + '</span>';
+      chip.innerHTML = head +
         '<span class="cn">' + esc(a.name) + '</span>' +
         '<span class="x" data-att="' + a.id + '">×</span>';
       bar.appendChild(chip);
     });
   }
 
+  window.__xiFileStart = function (id, name, mime, total, size) {
+    FILEQ[id] = { name: name, mime: mime, total: total, size: size, parts: [] };
+  };
+  window.__xiFileChunk = function (id, idx, part) {
+    var q = FILEQ[id];
+    if (q) q.parts[idx] = part;
+  };
+  window.__xiFileEnd = function (id) {
+    var q = FILEQ[id];
+    if (!q) return;
+    delete FILEQ[id];
+    var b64 = q.parts.join('');
+    addAttachment(id, q.name, q.mime, b64, q.size).catch(function (e) {
+      toast('读取失败：' + ((e && e.message) || e), 2600);
+    });
+  };
+  window.__xiFileMeta = function (id, name, size) {
+    ATTS.push({ id: id, kind: 'file', name: name, text: null, size: size });
+    renderAtts();
+    toast('文件太大（' + Math.round(size / 1048576) + ' MB），只带文件名', 3000);
+  };
+
   function pickAttach(kind) {
-    if (!(window.XiNative && window.XiNative.pickFileBridge)) {
+    if (!(window.XiNative && window.XiNative.pickAttachBridge)) {
       toast('浏览器里选不了文件，装到手机上用', 2200);
       return;
     }
-    var id = 'at' + (++attSeq) + Date.now().toString(36);
-    var wantImage = kind === 'image';
-    window.__xiPicked = async function (pid, name, b64) {
-      if (pid !== id) return;
-      try {
-        if (wantImage || IMG_EXT.test(name)) {
-          var raw = 'data:' + mimeOf(name) + ';base64,' + b64;
-          var shrunk = await shrinkImage(raw, 1280, 0.82);
-          ATTS.push({ id: id + '-' + ATTS.length, kind: 'image', name: name, preview: shrunk, dataUrl: shrunk, size: shrunk.length });
-        } else if (TXT_EXT.test(name)) {
-          var txt = new TextDecoder('utf-8').decode(b64ToBytes(b64));
-          ATTS.push({ id: id + '-' + ATTS.length, kind: 'file', name: name, text: txt.slice(0, 30000), size: txt.length });
-        } else {
-          ATTS.push({ id: id + '-' + ATTS.length, kind: 'file', name: name, text: null, size: Math.round(b64.length * 0.75) });
-        }
-        renderAtts();
-      } catch (e) {
-        toast('读取失败：' + e.message, 2600);
-      }
-    };
-    window.__xiPickedMeta = function (pid, name, size) {
-      if (pid !== id) return;
-      ATTS.push({ id: id + '-' + ATTS.length, kind: 'file', name: name, text: null, size: size });
-      renderAtts();
-      toast('文件较大，只带文件名（' + Math.round(size / 1024) + ' KB）', 2600);
-    };
+    var id = (kind === 'image' ? 'im' : 'at') + (++attSeq) + Date.now().toString(36);
     window.__xiPickCancelled = function () { };
     window.__xiPickError = function (i, m) { toast('读取失败：' + m, 2600); };
-    window.XiNative.pickFileBridge(id, wantImage ? 'image/*' : '*/*');
+    window.XiNative.pickAttachBridge(id, kind, S.imgMode || 'original');
+  }
+
+  async function addAttachment(id, name, mime, b64, size) {
+    var isImg = /^image\//i.test(mime || '') || IMG_EXT.test(name);
+
+    if (isImg) {
+      var url = 'data:' + (mime || 'image/jpeg') + ';base64,' + b64;
+      ATTS.push({ id: id, kind: 'image', name: name, preview: url, dataUrl: url, size: size });
+      renderAtts();
+      maybeWarnVision();
+      return;
+    }
+
+    if (/\.zip$/i.test(name)) {
+      await unzipAttach(id, name, b64, size);
+      return;
+    }
+
+    if (TXT_EXT.test(name) || /^text\//i.test(mime || '') || /json|xml|javascript/i.test(mime || '')) {
+      var txt = new TextDecoder('utf-8').decode(b64ToBytes(b64));
+      ATTS.push({ id: id, kind: 'file', name: name, text: txt.slice(0, 60000), size: size });
+      renderAtts();
+      return;
+    }
+
+    ATTS.push({ id: id, kind: 'file', name: name, text: null, size: size });
+    renderAtts();
+  }
+
+  /* 压缩包：解开，把里面的文本读进来（总量有预算，别把上下文撑爆） */
+  async function unzipAttach(id, name, b64, size) {
+    var budget = 120000;
+    try {
+      var entries = await ZIP.read(b64ToBytes(b64));
+      var texts = entries.filter(function (e) {
+        return TXT_EXT.test(e.path) || /\.(md|txt|json|ya?ml|toml|ini|cfg)$/i.test(e.path);
+      });
+      var used = 0;
+      var parts = [];
+      texts.forEach(function (e) {
+        if (used >= budget) return;
+        var t = e.text.slice(0, budget - used);
+        parts.push('--- ' + e.path + ' ---\n' + t);
+        used += t.length;
+      });
+      var body = parts.length
+        ? '压缩包 ' + name + '：' + entries.length + ' 个条目，读了 ' + texts.length + ' 个文本文件\n\n' + parts.join('\n\n')
+        : '压缩包 ' + name + '：' + entries.length + ' 个条目，里面没有可读文本';
+      ATTS.push({ id: id, kind: 'file', name: name, text: body, size: size, entries: entries.length });
+      renderAtts();
+      toast('已解开 ' + entries.length + ' 个条目', 2200);
+    } catch (e) {
+      ATTS.push({ id: id, kind: 'file', name: name, text: null, size: size });
+      renderAtts();
+      toast('解压失败，只带文件名：' + (e && e.message || e), 3000);
+    }
   }
 
   /* 当前会话里有没有带图的消息 */
@@ -1253,41 +1290,11 @@
     });
   }
 
-  /* 没填视觉模型时提醒一次：很多模型收到图会直接忽略或塞占位符 */
+  /* 没填视觉模型时提醒一次 */
   function maybeWarnVision() {
     if (S.visionModel || maybeWarnVision.done) return;
     maybeWarnVision.done = true;
     toast('没填「视觉模型」，图片可能被接口忽略；设置里补一个', 3800);
-  }
-
-  /* 多选图片：原生侧已经缩好图，这里直接进附件 */
-  function pickImages() {
-    if (!(window.XiNative && window.XiNative.pickImagesBridge)) {
-      toast('浏览器里选不了图，装到手机上用', 2200);
-      return;
-    }
-    var id = 'im' + (++attSeq) + Date.now().toString(36);
-    window.__xiImagesPicked = function (pid, json) {
-      if (pid !== id) return;
-      try {
-        var list = JSON.parse(json) || [];
-        list.forEach(function (it, i) {
-          var url = 'data:image/jpeg;base64,' + it.b64;
-          ATTS.push({
-            id: id + '-' + i, kind: 'image',
-            name: it.name || ('图片' + (i + 1)),
-            preview: url, dataUrl: url, size: it.b64.length,
-          });
-        });
-        renderAtts();
-        maybeWarnVision();
-      } catch (e) {
-        toast('读取失败：' + e.message, 2600);
-      }
-    };
-    window.__xiPickCancelled = function () { };
-    window.__xiPickError = function (i, m) { toast('读取失败：' + m, 2600); };
-    window.XiNative.pickImagesBridge(id);
   }
 
   function draftContent() {
@@ -1684,6 +1691,7 @@
     $('fAsr').value = S.asrModel || 'whisper-1';
     $('fTheme').value = S.theme || 'auto';
     $('fVisionModel').value = S.visionModel || '';
+    $('fImgMode').value = S.imgMode || 'original';
   }
 
   function readSettings() {
@@ -1705,6 +1713,7 @@
     S.asrModel = $('fAsr').value.trim() || 'whisper-1';
     S.theme = $('fTheme').value || 'auto';
     S.visionModel = $('fVisionModel').value.trim();
+    S.imgMode = $('fImgMode').value || 'original';
     applyTheme();
     saveSettings();
   }
@@ -2011,7 +2020,7 @@
       if (busy) stopChat(); else send();
     });
     $('btnAttach').addEventListener('click', function () { pickAttach('file'); });
-    $('btnPickImage').addEventListener('click', pickImages);
+    $('btnPickImage').addEventListener('click', function () { pickAttach('image'); });
     $('btnVoice').addEventListener('click', startVoice);
     $('btnRefreshBal').addEventListener('click', refreshBalance);
     $('ctxBal').addEventListener('click', function (e) {

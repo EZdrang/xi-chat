@@ -8,9 +8,26 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
-const TOKEN = process.env.GH_TOKEN;
-if (!TOKEN) { console.error('缺 GH_TOKEN'); process.exit(1); }
+function readToken() {
+  if (process.env.GH_TOKEN) return process.env.GH_TOKEN.trim();
+  // 没有环境变量就找文件：仓库根 .gh-token，或用户目录 .gh-token
+  const candidates = [
+    path.join(__dirname, '..', '.gh-token'),
+    path.join(os.homedir(), '.gh-token'),
+  ];
+  for (const f of candidates) {
+    if (fs.existsSync(f)) return fs.readFileSync(f, 'utf8').trim();
+  }
+  return '';
+}
+
+const TOKEN = readToken();
+if (!TOKEN) {
+  console.error('缺 token：设 GH_TOKEN，或把 PAT 存到 ~/.gh-token');
+  process.exit(1);
+}
 
 const REPO = process.env.REPO || 'EZdrang/xi-chat';
 const TAG = process.env.TAG || 'v1.4.0';

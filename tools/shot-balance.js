@@ -48,7 +48,7 @@ const BASE = 'http://127.0.0.1:8787/index.html';
 
     return {
       bal: window.__xi.BAL,
-      footer: document.getElementById('balance').textContent,
+      footer: document.getElementById('ctxBal').textContent,
       row: document.getElementById('balRow').textContent,
       url: calls[0] && calls[0].url,
       method: calls[0] && calls[0].method,
@@ -59,7 +59,7 @@ const BASE = 'http://127.0.0.1:8787/index.html';
 
   const ok = r.method === 'GET' &&
     r.url === 'https://api.deepseek.com/user/balance' &&
-    r.footer.includes('¥7.79') && r.row.includes('赠送 ¥3.81') &&
+    r.footer === '¥7.79' && r.row.includes('赠送 ¥3.81') &&
     r.row.includes('充值 ¥3.98') &&
     r.hasImageBtn && r.hasFileBtn && errs.length === 0;
 

@@ -239,6 +239,16 @@ body::before {
 }
 .ctx-usage b { color: var(--brand-deep); font-weight: 650; background: none; }
 .ctx-usage i { font-style: normal; color: var(--gold-deep); background: none; }
+
+.ctx-bal {
+  flex: none; margin-left: 8px; padding-left: 8px;
+  border-left: 1px solid var(--line-2);
+  color: var(--gold-deep); font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ctx-bal.neg { color: var(--danger); }
+[data-theme="dark"] .ctx-bal { color: var(--gold-2); }
+[data-theme="dark"] .ctx-bal.neg { color: #ff8a8a; }
 .ctx-track { flex: 1; height: 3px; border-radius: 999px; background: rgba(28, 50, 107, .10); overflow: hidden; }
 .ctx-track b {
   display: block; height: 100%; width: 0%;

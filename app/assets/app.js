@@ -602,13 +602,16 @@
   }
 
   function renderBalance() {
-    var txt = '余额 --';
-    if (BAL && !isNaN(BAL.total)) {
-      txt = '余额 ' + money(BAL.cur, BAL.total);
-      if (BAL.granted > 0) txt += '（赠 ' + money(BAL.cur, BAL.granted) + '）';
+    var el = $('ctxBal');
+    if (el) {
+      if (BAL && !isNaN(BAL.total)) {
+        el.textContent = money(BAL.cur, BAL.total);
+        el.classList.toggle('neg', BAL.total < 0);
+      } else {
+        el.textContent = '余额 --';
+        el.classList.remove('neg');
+      }
     }
-    var el = $('balance');
-    if (el) el.textContent = txt;
 
     var row = $('balRow');
     if (row) {
@@ -620,6 +623,18 @@
       } else {
         row.textContent = '余额：不可用（接口不支持查询，或 Key 没权限）';
       }
+    }
+  }
+
+  async function openBalance() {
+    await refreshBalance();
+    var detail = (BAL && !isNaN(BAL.total))
+      ? '<b>' + money(BAL.cur, BAL.total) + '</b><br>赠送 ' + money(BAL.cur, BAL.granted) +
+        ' · 充值 ' + money(BAL.cur, BAL.topped)
+      : '查不到余额：这个接口不一定支持查询。';
+    var go = await dialog('账户余额', detail, '去充值', false);
+    if (go && window.XiNative && window.XiNative.openUrl) {
+      window.XiNative.openUrl('https://platform.deepseek.com/top_up');
     }
   }
 
@@ -756,15 +771,19 @@
 
   function updateCtx() {
     var bar = $('ctx');
-    if (!S || !S.compress) { bar.classList.add('hidden'); return; }
     var est = estimateContext();
     var win = S.ctxWindow || 64000;
     var pct = Math.min(100, (est / win) * 100);
     bar.classList.remove('hidden', 'warn', 'full');
-    if (pct > 88) bar.classList.add('full');
-    else if (pct > 68) bar.classList.add('warn');
-    $('ctxBar').style.width = pct.toFixed(1) + '%';
-    $('ctxText').textContent = '上下文 ' + Math.round(pct) + '%';
+    if (S.compress) {
+      if (pct > 88) bar.classList.add('full');
+      else if (pct > 68) bar.classList.add('warn');
+      $('ctxBar').style.width = pct.toFixed(1) + '%';
+      $('ctxText').textContent = '上下文 ' + Math.round(pct) + '%';
+    } else {
+      $('ctxBar').style.width = '0%';
+      $('ctxText').textContent = '压缩已关';
+    }
     var u = cur && cur.usage;
     $('ctxUsage').innerHTML = (u && u.reqs)
       ? '↑<b>' + fmtK(u.p) + '</b> ↓<b>' + fmtK(u.c) + '</b> · <i>缓存 ' + hitRate(u) + '%</i>'
@@ -1942,7 +1961,14 @@
     $('btnPickImage').addEventListener('click', function () { pickAttach('image'); });
     $('btnVoice').addEventListener('click', startVoice);
     $('btnRefreshBal').addEventListener('click', refreshBalance);
-    $('balance').addEventListener('click', refreshBalance);
+    $('ctxBal').addEventListener('click', function (e) {
+      e.stopPropagation();
+      openBalance();
+    });
+    $('ctxUsage').addEventListener('click', function () {
+      renderUsage();
+      openSheet('sheet-usage');
+    });
     $('ctx').addEventListener('click', function () {
       renderUsage();
       openSheet('sheet-usage');

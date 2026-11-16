@@ -565,6 +565,18 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
+        public void openUrl(String url) {
+            if (url == null) return;
+            final String u = url;
+            ui.post(() -> {
+                try {
+                    startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(u)));
+                } catch (Exception ignored) {
+                }
+            });
+        }
+
+        @JavascriptInterface
         public void voiceBridge(String id) {
             ui.post(() -> MainActivity.this.startVoice(id));
         }

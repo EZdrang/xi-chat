@@ -136,7 +136,8 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onPause() {
-        if (web != null) web.onPause();
+        // 不要调用 web.onPause()：那会暂停 WebView 的 JS 定时器，
+        // 切到后台时正在流式回复的消息会直接卡死。
         super.onPause();
     }
 

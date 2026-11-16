@@ -46,6 +46,7 @@
   var busy = false;
   var aborted = false;
   var currentReq = null;
+  var streamCtx = null;
   var pendingReq = {};    // id -> handlers
   var reqSeq = 0;
   var openStack = [];
@@ -713,6 +714,12 @@
     box.innerHTML = '';
     if (!cur) return;
     cur.messages.forEach(function (m, i) { box.appendChild(msgNode(m, i)); });
+    // 切回正在流式输出的那条会话：把气泡重新接上，继续往下刷
+    if (streamCtx && streamCtx.sess === cur) {
+      var si = cur.messages.indexOf(streamCtx.msg);
+      var sn = si >= 0 ? box.children[si] : null;
+      if (sn) streamCtx.rebind(sn);
+    }
     refreshHeader();
     updateCtx();
     requestAnimationFrame(function () { scrollBottom(true); });
@@ -1023,6 +1030,12 @@
     return { p: p, c: c, hit: hit, miss: miss };
   }
 
+  function addUsageTo(sess, u) {
+    if (!u || !sess) return;
+    var t = sess.usage || (sess.usage = { p: 0, c: 0, hit: 0, miss: 0, reqs: 0 });
+    t.p += u.p; t.c += u.c; t.hit += u.hit; t.miss += u.miss; t.reqs++;
+  }
+
   function addUsage(u) {
     if (!u || !cur) return;
     var t = cur.usage || (cur.usage = { p: 0, c: 0, hit: 0, miss: 0, reqs: 0 });
@@ -1283,9 +1296,10 @@
   }
 
   /* 当前会话里有没有带图的消息 */
-  function hasImages() {
-    if (!cur) return false;
-    return cur.messages.some(function (m) {
+  function hasImages(sess) {
+    var src = sess || cur;
+    if (!src) return false;
+    return src.messages.some(function (m) {
       return m.role === 'user' && m.images && m.images.length;
     });
   }
@@ -1316,13 +1330,14 @@
 
   /* ════════════════════ 发消息 ════════════════════ */
 
-  function buildMessages() {
+  function buildMessages(sess) {
+    sess = sess || cur;
     var out = [];
     var recalled = [];
     if (S.memoryOn) {
       var lastUser = '';
-      for (var i = cur.messages.length - 1; i >= 0; i--) {
-        if (cur.messages[i].role === 'user') { lastUser = cur.messages[i].content; break; }
+      for (var i = sess.messages.length - 1; i >= 0; i--) {
+        if (sess.messages[i].role === 'user') { lastUser = sess.messages[i].content; break; }
       }
       recalled = MEM.recall(lastUser, 3);
       out.push({
@@ -1332,10 +1347,10 @@
     } else {
       out.push({ role: 'system', content: '你是汐，中文，先结论后理由，简短务实。' });
     }
-    if (cur.summary) {
-      out.push({ role: 'system', content: '【早前对话的压缩摘要】\n' + cur.summary });
+    if (sess.summary) {
+      out.push({ role: 'system', content: '【早前对话的压缩摘要】\n' + sess.summary });
     }
-    cur.messages.forEach(function (m) {
+    sess.messages.forEach(function (m) {
       if (m.role !== 'user' && m.role !== 'assistant') return;
       if (m.role === 'user' && m.images && m.images.length) {
         var parts = [];
@@ -1352,7 +1367,10 @@
   }
 
   async function send() {
-    if (busy) return;
+    if (busy) {
+      toast('上一条还在回，等它说完再发', 2000);
+      return;
+    }
     var d = draftContent();
     if (!d.text && !d.images.length) return;
     if (!S.apiKey) {
@@ -1389,9 +1407,10 @@
     await saveCur();
     updateCtx();
 
+    var sess = cur;
     try {
       if (S.compress) await maybeCompress();
-      await runChat();
+      await runChat(sess);
     } finally {
       busy = false;
       setSendState('send');
@@ -1410,21 +1429,23 @@
       : '<svg viewBox="0 0 24 24" width="20" height="20"><path d="M4 12l16-7-6.2 16-2.6-6.6L4 12z" stroke="currentColor" stroke-width="1.7" fill="none" stroke-linejoin="round"/></svg>';
   }
 
-  function runChat() {
+﻿  function runChat(sess) {
     return new Promise(function (resolve) {
       var msg = { role: 'assistant', content: '', reasoning: '', ts: Date.now() };
-      cur.messages.push(msg);
-      var el = appendMsg(msg);
-      var mdEl = el.querySelector('.md');
-      var bubble = el.querySelector('.bubble');
+      sess.messages.push(msg);
+
+      var el = (cur === sess) ? appendMsg(msg) : null;
+      var bubble = el ? el.querySelector('.bubble') : null;
+      var mdEl = el ? el.querySelector('.md') : null;
       var acc = '', reason = '';
       var settled = false;
       var lastPaint = 0;
       var lastUsage = null;
 
-      bubble.classList.add('streaming');
+      if (bubble) bubble.classList.add('streaming');
 
       function paint(force) {
+        if (!mdEl || !el || !document.body.contains(el)) return;
         var now = Date.now();
         if (!force && now - lastPaint < 110) return;
         lastPaint = now;
@@ -1432,30 +1453,47 @@
         scrollBottom();
       }
 
+      var ctx = {
+        sess: sess,
+        msg: msg,
+        rebind: function (node) {
+          el = node;
+          bubble = node.querySelector('.bubble');
+          mdEl = node.querySelector('.md');
+          if (bubble) bubble.classList.add('streaming');
+          paint(true);
+        },
+      };
+      streamCtx = ctx;
+
       function finish(err) {
         if (settled) return;
         settled = true;
-        bubble.classList.remove('streaming');
+        if (bubble) bubble.classList.remove('streaming');
         currentReq = null;
+        if (streamCtx === ctx) streamCtx = null;
 
+        var dropped = false;
         if (err) {
           if (aborted && acc) {
             msg.content = acc + '\n\n*（已停止）*';
           } else if (aborted) {
-            cur.messages.pop();
-            el.remove();
+            sess.messages.pop();
+            if (el) el.remove();
             resolve();
             return;
           } else {
-            el.classList.add('err');
-            bubble.innerHTML = '<b>请求失败</b><br>' + esc(err);
-            cur.messages.pop();
-            setTimeout(function () { el.remove(); }, 1);
-            el.remove();
+            sess.messages.pop();
+            if (el) el.remove();
+            dropped = true;
+            if (cur === sess) toast('请求失败：' + err, 3200);
           }
         } else {
           msg.content = acc;
         }
+
+        if (dropped) { resolve(); return; }
+
         var skillDir = null;
         if (msg.content) {
           var ex = extractSkillDirective(msg.content);
@@ -1465,24 +1503,29 @@
           }
         }
         var uu = mapUsage(lastUsage);
-        if (uu) {
-          msg.usage = uu;
-          addUsage(uu);
-        }
+        if (uu) msg.usage = uu;
         if (reason) msg.reasoning = reason;
 
-        if (msg.content) {
-          mdEl.innerHTML = MD.render(msg.content);
-          if (msg.reasoning) {
-            var d = document.createElement('details');
-            d.className = 'think';
-            d.innerHTML = '<summary>思考过程</summary><div class="think-body">' + esc(reason) + '</div>';
-            bubble.insertBefore(d, bubble.firstChild);
+        if (cur === sess) {
+          addUsage(uu);
+          if (mdEl && msg.content) {
+            mdEl.innerHTML = MD.render(msg.content);
+            if (msg.reasoning && bubble) {
+              var d = document.createElement('details');
+              d.className = 'think';
+              d.innerHTML = '<summary>思考过程</summary><div class="think-body">' + esc(msg.reasoning) + '</div>';
+              bubble.insertBefore(d, bubble.firstChild);
+            }
           }
+          refreshHeader();
+          saveCur();
+          scrollBottom();
+        } else {
+          // 用户切走了：把结果写回那条会话，别丢
+          persistSession(sess, uu);
+          toast('「' + (sess.title || '另一条对话') + '」回完了', 2200);
         }
-        refreshHeader();
-        saveCur();
-        scrollBottom();
+
         if (skillDir) {
           setTimeout(function () { installSkill(skillDir.repo, skillDir.triggers || null); }, 900);
         }
@@ -1490,8 +1533,8 @@
       }
 
       var body = {
-        model: (hasImages() && S.visionModel) ? S.visionModel : S.model,
-        messages: buildMessages(),
+        model: (hasImages(sess) && S.visionModel) ? S.visionModel : S.model,
+        messages: buildMessages(sess),
         stream: !!S.stream,
       };
       if (S.temperature != null) body.temperature = Number(S.temperature);
@@ -1510,7 +1553,7 @@
           if (!ch) return;
           var delta = ch.delta || ch.message;
           if (!delta) return;
-          if (delta.reasoning_content) { reason += delta.reasoning_content; }
+          if (delta.reasoning_content) reason += delta.reasoning_content;
           if (typeof delta.content === 'string' && delta.content) {
             acc += delta.content;
             paint();
@@ -1528,6 +1571,20 @@
         },
       };
     });
+  }
+
+  function persistSession(sess, uu) {
+    if (uu) addUsageTo(sess, uu);
+    var meta = sessions.find(function (s) { return s.id === sess.id; });
+    if (meta) {
+      meta.title = sess.title;
+      meta.updatedAt = Date.now();
+      meta.count = sess.messages.filter(function (m) {
+        return m.role === 'user' || m.role === 'assistant';
+      }).length;
+      meta.usage = sess.usage;
+    }
+    kvSet('s:' + sess.id, sess).then(saveIndex);
   }
 
   function stopChat() {

@@ -1,0 +1,17 @@
+{
+  "name": "xi-chat",
+  "version": "1.4.0",
+  "private": true,
+  "description": "汐 · 手机版：带长线记忆的安卓聊天 App（记忆为 markdown，可与桌面 DSH 记忆库互通）",
+  "license": "MIT",
+  "type": "commonjs",
+  "keywords": ["android", "llm", "chat", "memory", "markdown", "apk"],
+  "scripts": {
+    "test": "node tools/test.js && node tools/test-desk.js",
+    "test:ui": "node tools/shot.js && node tools/shot-usage.js && node tools/shot-compress.js && node tools/shot-smoke.js",
+    "serve": "python -m http.server 8787 --bind 127.0.0.1 --directory app/assets"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^23.11.1"
+  }
+}

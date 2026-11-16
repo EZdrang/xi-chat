@@ -1,0 +1,23 @@
+# 构建与测试产物
+build/
+dist/
+
+# 签名密钥：绝对不要提交
+*.jks
+*.keystore
+*.idsig
+
+# 依赖
+node_modules/
+package-lock.json
+
+# 本地验收截图与临时目录
+shots/
+icon-preview.png
+tmp-*/
+tmp-*
+
+# 系统
+.DS_Store
+Thumbs.db
+*.log

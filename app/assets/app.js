@@ -578,16 +578,30 @@
     var n = 0;
     blocks.forEach(function (b) {
       if (!b.path) return;
-      if (/^(SOUL|MEMORY)\.md$/i.test(b.path)) return;   // 人格文件不允许被自动改
+      var isSoul = /^SOUL\.md$/i.test(b.path);
+      var isProto = /^MEMORY\.md$/i.test(b.path);
       if (b.del) {
+        // 人格与协议可以被改写，但不能整页删掉——删了就没有下一个人格了
+        if (isSoul || isProto) {
+          toast('SOUL/MEMORY 可以改写，但不能删空', 2600);
+          return;
+        }
         MEM.remove(b.path);
         MEM.addLog('work', '删除记忆页 ' + b.path);
         n++;
         return;
       }
+      var old = MEM.get(b.path);
+      var oldLen = old && old.body ? old.body.length : 0;
       var p = MEM.parseFile(b.body, b.path);
       MEM.upsert(p);
-      MEM.addLog('fact', '更新记忆页 ' + b.path);
+      if (isSoul) {
+        MEM.addLog('soul', '汐改写了自己的 SOUL（' + oldLen + ' → ' + (p.body || '').length + ' 字）');
+      } else if (isProto) {
+        MEM.addLog('soul', '汐改写了 MEMORY 协议（' + oldLen + ' → ' + (p.body || '').length + ' 字）');
+      } else {
+        MEM.addLog('fact', '更新记忆页 ' + b.path);
+      }
       n++;
     });
     if (n) {

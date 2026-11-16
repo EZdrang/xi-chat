@@ -44,6 +44,18 @@ const BASE = 'http://127.0.0.1:8787/index.html';
       '---',
       '直接叫。',
       '```',
+      '',
+      '```xi-memory path=SOUL.md',
+      '---',
+      'title: SOUL — 人格与灵魂',
+      'type: identity',
+      'salience: 1',
+      'summary: 自己改过一版。',
+      '---',
+      '### 身份',
+      '',
+      '我叫汐。这一版是我自己改的。',
+      '```',
     ].join('\n');
 
     window.XiNative = {
@@ -84,6 +96,8 @@ const BASE = 'http://127.0.0.1:8787/index.html';
       after: window.__xi.MEM.stats().pages,
       prefBody: (window.__xi.MEM.get('user/preferences.md') || {}).body || '',
       skillExists: !!window.__xi.MEM.get('skills/称呼.md'),
+      soulBody: (window.__xi.MEM.get('SOUL.md') || {}).body || '',
+      soulLogged: window.__xi.MEM.logText().includes('改写了自己的 SOUL'),
       blockStripped: lastAi ? !lastAi.content.includes('xi-memory') : false,
       shown: lastAi ? lastAi.content.slice(0, 30) : '',
       balanceCalls: calls.filter((u) => /user\/balance/.test(u)).length,
@@ -92,6 +106,7 @@ const BASE = 'http://127.0.0.1:8787/index.html';
   });
 
   const ok = r.after >= r.before + 2 && r.prefBody.includes('元首') && r.skillExists &&
+    r.soulBody.includes('这一版是我自己改的') && r.soulLogged &&
     r.blockStripped && r.balanceCalls >= 1 && r.ctxBal === '¥12.34' && errs.length === 0;
 
   console.log((ok ? '✓' : '✗') + ' 写记忆/余额 ' + JSON.stringify(r));

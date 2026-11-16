@@ -27,6 +27,10 @@
     theme: 'auto',
     visionModel: '',
     imgMode: 'original',
+    searchMode: 'off',
+    searchModel: 'deepseek-flash',
+    searchUrl: '',
+    searchKey: '',
   };
 
   var PRESETS = [
@@ -48,6 +52,7 @@
   var currentReq = null;
   var streamCtx = null;
   var pendingFind = '';
+  var pendingSearch = '';
   var renderLimits = {};   // 会话 id → 渲染多少条（长会话懒加载）
   var pendingReq = {};    // id -> handlers
   var reqSeq = 0;
@@ -173,11 +178,29 @@
     return base + path;
   }
 
+  /* 一次性 POST 拿整段 JSON（搜索、余额这类非流式调用用） */
+  function postJSON(url, body, extra) {
+    return new Promise(function (resolve, reject) {
+      netPost(url, body, {
+        onData: function (raw) {
+          try { resolve(JSON.parse(raw)); } catch (e) { reject(new Error('接口返回不是 JSON')); }
+        },
+        onError: function (code, m) { reject(new Error(parseErr(code, m))); },
+        onDone: function () { },
+      }, false, extra);
+    });
+  }
+
   /* 返回 { abort } */
-  function netPost(url, bodyObj, handlers, stream) {
+  function netPost(url, bodyObj, handlers, stream, extra) {
     var id = 'r' + (++reqSeq) + '_' + Date.now().toString(36);
     var payload = JSON.stringify(bodyObj);
     var hdr = headers();
+    if (extra) {
+      for (var k in extra) {
+        if (extra[k]) hdr[k] = extra[k];
+      }
+    }
 
     if (window.XiNative && window.XiNative.http) {
       pendingReq[id] = handlers;
@@ -621,6 +644,99 @@
       renderMemory();
     }
     return n;
+  }
+
+  /* ════════════════════ 联网搜索 ════════════════════ */
+
+  function sniffResults(j) {
+    var arr = j.results || j.web_pages || j.organic || j.value ||
+      (j.data && (j.data.results || j.data.webPages || j.data.value)) || [];
+    if (!Array.isArray(arr)) arr = [];
+    return arr.map(function (r) {
+      return {
+        title: String(r.title || r.name || '').slice(0, 100),
+        url: r.url || r.link || r.href || '',
+        snippet: String(r.snippet || r.description || r.content || r.text || '').slice(0, 220),
+      };
+    }).filter(function (r) { return r.url; }).slice(0, 6);
+  }
+
+  function parseDuck(html) {
+    var out = [];
+    var re = /<a[^>]+class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
+    var m;
+    while ((m = re.exec(html)) && out.length < 6) {
+      var url = m[1].replace(/&amp;/g, '&');
+      var title = m[2].replace(/<[^>]+>/g, '').trim();
+      out.push({ title: title.slice(0, 100), url: url, snippet: '' });
+    }
+    var snip = /class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
+    var i = 0, n;
+    while ((n = snip.exec(html)) && i < out.length) {
+      out[i].snippet = n[1].replace(/<[^>]+>/g, '').trim().slice(0, 220);
+      i++;
+    }
+    return out;
+  }
+
+  async function webSearch(q) {
+    var mode = S.searchMode || 'off';
+    if (mode === 'off') return [];
+
+    if (mode === 'duck') {
+      var html = await ghGet('https://html.duckduckgo.com/html/?q=' + encodeURIComponent(q));
+      var hits = parseDuck(html);
+      if (!hits.length) throw new Error('DuckDuckGo 没返回结果（可能被墙）');
+      return hits;
+    }
+
+    var url = (S.searchUrl || '').trim();
+    if (!url) throw new Error('没填搜索接口地址');
+    var headers = { 'Content-Type': 'application/json' };
+    var key = (S.searchKey || '').trim();
+    if (key) {
+      headers['Authorization'] = 'Bearer ' + key;
+      headers['X-API-KEY'] = key;
+      headers['X-Subscription-Token'] = key;
+    }
+    var body = { query: q, q: q, max_results: 6, count: 6, num: 6, search_depth: 'basic' };
+    var raw = await postJSON(url, body, headers);
+    var res = sniffResults(raw);
+    if (!res.length) throw new Error('接口返回里没认出结果（换个服务商试试）');
+    return res;
+  }
+
+  async function continueWithWebSearch(sess, kw) {
+    try {
+      var hits = await webSearch(kw);
+      if (!hits.length) {
+        sess.messages.push({ role: 'system', hidden: true, content: '【搜索「' + kw + '」没有结果】' });
+      } else {
+        var lines = hits.map(function (h, i) {
+          return (i + 1) + '. ' + h.title + '\n   ' + h.url + '\n   ' + h.snippet;
+        });
+        sess.messages.push({
+          role: 'system', hidden: true,
+          content: '【网页搜索「' + kw + '」的结果】\n' + lines.join('\n') +
+            '\n\n基于这些写答案，引用就用上面的链接；结果不够就直说，别编。',
+        });
+        toast('搜到 ' + hits.length + ' 条', 1800);
+      }
+    } catch (e) {
+      sess.messages.push({
+        role: 'system', hidden: true,
+        content: '【搜索「' + kw + '」失败：' + ((e && e.message) || e) + '】\n如实告诉指挥官搜不了，别编内容。',
+      });
+    }
+    await saveCur();
+    await runChat(sess);
+  }
+
+  /* 从回复里捞「查一下」指令块 */
+  function extractSearchDirective(text) {
+    var m = text.match(/```xi-search\s*\n([\s\S]*?)```/);
+    if (!m) return { text: text, kw: '' };
+    return { text: text.replace(m[0], '').trim(), kw: (m[1] || '').trim().slice(0, 120) };
   }
 
   /* 从回复里捞「帮我搜一下」指令块 */
@@ -1561,6 +1677,9 @@
     if (sess.summary) {
       out.push({ role: 'system', content: '【早前对话的压缩摘要】\n' + sess.summary });
     }
+    if (S.searchMode === 'native') {
+      out.push({ role: 'system', content: '【本机已开启 DeepSeek 内置联网：服务端会自动搜索并带引用，你直接回答就行，不用输出 xi-search 块。】' });
+    }
     sess.messages.forEach(function (m) {
       if (m.hidden && m.role === 'system') {
         out.push({ role: 'system', content: m.content });
@@ -1627,11 +1746,17 @@
       if (S.compress) await maybeCompress();
       await runChat(sess);
       var hops = 0;
-      while (pendingFind && hops < 2) {
-        var kw = pendingFind;
-        pendingFind = '';
+      while (hops < 2 && (pendingSearch || pendingFind)) {
         hops++;
-        await continueWithSearch(sess, kw);
+        if (pendingSearch) {
+          var q = pendingSearch;
+          pendingSearch = '';
+          await continueWithWebSearch(sess, q);
+        } else {
+          var kw = pendingFind;
+          pendingFind = '';
+          await continueWithSearch(sess, kw);
+        }
       }
     } finally {
       busy = false;
@@ -1719,7 +1844,13 @@
         var skillDir = null;
         var memBlocks = [];
         pendingFind = '';
+        pendingSearch = '';
         if (msg.content) {
+          var sd = extractSearchDirective(msg.content);
+          if (sd.kw) {
+            msg.content = sd.text;
+            pendingSearch = sd.kw;
+          }
           var fd = extractFindDirective(msg.content);
           if (fd.kw) {
             msg.content = fd.text;
@@ -1771,13 +1902,24 @@
         resolve();
       }
 
+      var nativeSearch = S.searchMode === 'native';
       var body = {
-        model: (hasImages(sess) && S.visionModel) ? S.visionModel : S.model,
+        model: nativeSearch
+          ? (S.searchModel || 'deepseek-flash')
+          : ((hasImages(sess) && S.visionModel) ? S.visionModel : S.model),
         messages: buildMessages(sess),
         stream: !!S.stream,
       };
-      if (S.temperature != null) body.temperature = Number(S.temperature);
-      if (S.maxTokens) body.max_tokens = Number(S.maxTokens);
+      if (nativeSearch) {
+        // DeepSeek 服务端工具：搜索与读链接都在他们那边跑，客户端只负责渲染
+        body.tools = [
+          { type: 'deepseek_web_search', name: 'deepseek_web_search' },
+          { type: 'deepseek_read_url', name: 'deepseek_read_url' },
+        ];
+      } else {
+        if (S.temperature != null) body.temperature = Number(S.temperature);
+        if (S.maxTokens) body.max_tokens = Number(S.maxTokens);
+      }
       if (body.stream) body.stream_options = { include_usage: true };
 
       var req = netPost(joinUrl('/chat/completions'), body, {
@@ -1988,6 +2130,10 @@
     $('fTheme').value = S.theme || 'auto';
     $('fVisionModel').value = S.visionModel || '';
     $('fImgMode').value = S.imgMode || 'original';
+    $('fSearchMode').value = S.searchMode || 'off';
+    $('fSearchModel').value = S.searchModel || 'deepseek-flash';
+    $('fSearchUrl').value = S.searchUrl || '';
+    $('fSearchKey').value = S.searchKey || '';
   }
 
   function readSettings() {
@@ -2010,6 +2156,10 @@
     S.theme = $('fTheme').value || 'auto';
     S.visionModel = $('fVisionModel').value.trim();
     S.imgMode = $('fImgMode').value || 'original';
+    S.searchMode = $('fSearchMode').value || 'off';
+    S.searchModel = $('fSearchModel').value.trim() || 'deepseek-flash';
+    S.searchUrl = $('fSearchUrl').value.trim();
+    S.searchKey = $('fSearchKey').value.trim();
     applyTheme();
     saveSettings();
   }

@@ -217,6 +217,25 @@
         <input id="fStream" type="checkbox" class="sw">
       </label>
 
+      <div class="sec-title">联网搜索</div>
+      <label class="field"><span>搜索服务</span>
+        <select id="fSearchMode">
+          <option value="off">关闭</option>
+          <option value="native">DeepSeek 内置（服务端搜，带引用）</option>
+          <option value="duck">DuckDuckGo（免 Key，可能被墙）</option>
+          <option value="custom">自定义接口（博查 / Serper / Tavily / Brave）</option>
+        </select>
+      </label>
+      <label class="field"><span>内置搜索用的模型（DeepSeek 只支持 flash）</span>
+        <input id="fSearchModel" type="text" placeholder="deepseek-flash" autocomplete="off" spellcheck="false">
+      </label>
+      <label class="field"><span>接口地址（自定义时必填）</span>
+        <input id="fSearchUrl" type="url" placeholder="https://api.bochaai.com/v1/web-search" autocomplete="off" spellcheck="false">
+      </label>
+      <label class="field"><span>搜索 Key</span>
+        <input id="fSearchKey" type="text" placeholder="sk-... / tvly-..." autocomplete="off" spellcheck="false">
+      </label>
+
       <div class="sec-title">账户</div>
       <div class="row-actions">
         <button class="btn-soft" id="btnRefreshBal">刷新余额</button>

@@ -47,6 +47,7 @@
   var aborted = false;
   var currentReq = null;
   var streamCtx = null;
+  var renderLimits = {};   // 会话 id → 渲染多少条（长会话懒加载）
   var pendingReq = {};    // id -> handlers
   var reqSeq = 0;
   var openStack = [];
@@ -399,40 +400,56 @@
   }
 
   function importSession() {
-    if (!(window.XiNative && window.XiNative.pickFileBridge)) {
+    if (!(window.XiNative && window.XiNative.pickAttachBridge)) {
       toast('手机端才能选文件', 2000);
       return;
     }
-    var id = 'is' + Date.now();
-    window.__xiPicked = function (pid, name, b64) {
-      if (pid !== id) return;
-      try {
-        var txt = new TextDecoder('utf-8').decode(b64ToBytes(b64));
-        var j = JSON.parse(txt);
-        var src = j.session || j;
-        if (!src || !Array.isArray(src.messages)) throw new Error('不是对话文件');
-        var ns = {
-          id: uid(),
-          title: (src.title || name.replace(/\.json$/i, '')) + '（导入）',
-          messages: src.messages, summary: src.summary || '', turns: 0,
-          createdAt: src.createdAt || Date.now(), updatedAt: Date.now(),
-          count: src.messages.length,
-        };
-        sessions.unshift({ id: ns.id, title: ns.title, updatedAt: ns.updatedAt, count: ns.count });
-        kvSet('s:' + ns.id, ns).then(function () {
-          saveIndex();
-          renderSessions();
-          openSession(ns.id);
-          closeDrawer();
-        });
-        toast('已导入「' + ns.title + '」', 2200);
-      } catch (e) {
-        toast('导入失败：' + e.message, 2800);
-      }
-    };
+    var id = 'is' + Date.now().toString(36);
     window.__xiPickCancelled = function () { };
     window.__xiPickError = function (i, m) { toast('读取失败：' + m, 2600); };
-    window.XiNative.pickFileBridge(id);
+    window.XiNative.pickAttachBridge(id, 'file', 'original');
+  }
+
+  /* 导入：单条（type=session）和整包（type=sessions）都认 */
+  async function importFromB64(name, b64) {
+    var txt = new TextDecoder('utf-8').decode(b64ToBytes(b64));
+    var j = JSON.parse(txt);
+
+    var list = [];
+    if (Array.isArray(j.sessions)) list = j.sessions;
+    else if (j.session) list = [j.session];
+    else if (Array.isArray(j.messages)) list = [j];
+    if (!list.length) throw new Error('不是对话文件');
+
+    var added = 0;
+    var metas = [];
+    for (var i = 0; i < list.length; i++) {
+      var src = list[i];
+      if (!src || !Array.isArray(src.messages) || !src.messages.length) continue;
+      var ns = {
+        id: uid(),
+        title: (src.title || name.replace(/\.json$/i, '') || '导入的对话').slice(0, 40),
+        messages: src.messages,
+        summary: src.summary || '',
+        turns: 0,
+        createdAt: src.createdAt || Date.now(),
+        updatedAt: Date.now(),
+        count: src.messages.length,
+      };
+      metas.push({ id: ns.id, title: ns.title, updatedAt: ns.updatedAt, count: ns.count });
+      await kvSet('s:' + ns.id, ns);
+      added++;
+    }
+    // 保住导入文件里的先后顺序
+    sessions = metas.concat(sessions);
+
+    await saveIndex();
+    renderSessions();
+    if (added) {
+      await openSession(metas[0].id);
+      closeDrawer();
+    }
+    toast('导入了 ' + added + ' 条对话', 3200);
   }
 
   /* ════════════════════ 从 GitHub 装技能 ════════════════════ */
@@ -713,12 +730,32 @@
     var box = $('msgs');
     box.innerHTML = '';
     if (!cur) return;
-    cur.messages.forEach(function (m, i) { box.appendChild(msgNode(m, i)); });
+
+    var total = cur.messages.length;
+    var lim = renderLimits[cur.id] || 80;
+    var start = Math.max(0, total - lim);
+
+    if (start > 0) {
+      var more = document.createElement('button');
+      more.className = 'load-more';
+      more.textContent = '载入更早的 ' + Math.min(80, start) + ' 条（共 ' + total + ' 条）';
+      more.addEventListener('click', function () {
+        renderLimits[cur.id] = (renderLimits[cur.id] || 80) + 80;
+        renderChat();
+      });
+      box.appendChild(more);
+    }
+    box.dataset.start = String(start);
+    box.dataset.more = start > 0 ? '1' : '0';
+
+    for (var i = start; i < total; i++) box.appendChild(msgNode(cur.messages[i], i));
+
     // 切回正在流式输出的那条会话：把气泡重新接上，继续往下刷
     if (streamCtx && streamCtx.sess === cur) {
       var si = cur.messages.indexOf(streamCtx.msg);
-      var sn = si >= 0 ? box.children[si] : null;
-      if (sn) streamCtx.rebind(sn);
+      var offset = (start > 0 ? 1 : 0);
+      var sn = si >= start ? box.children[si - start + offset] : null;
+      if (sn && sn.classList.contains('msg')) streamCtx.rebind(sn);
     }
     refreshHeader();
     updateCtx();
@@ -1218,6 +1255,12 @@
     if (!q) return;
     delete FILEQ[id];
     var b64 = q.parts.join('');
+    if (id.indexOf('is') === 0) {
+      importFromB64(q.name, b64).catch(function (e) {
+        toast('导入失败：' + ((e && e.message) || e), 3200);
+      });
+      return;
+    }
     addAttachment(id, q.name, q.mime, b64, q.size).catch(function (e) {
       toast('读取失败：' + ((e && e.message) || e), 2600);
     });

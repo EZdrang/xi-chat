@@ -542,6 +542,48 @@ public class MainActivity extends Activity {
             new Thread(() -> doTranscribe(id, url, apiKey, model, b64, ext)).start();
         }
 
+        /** 抓二进制（图片）并以 base64 回给 JS —— 文本桥会把字节弄坏 */
+        @JavascriptInterface
+        public void fetchBase64(String id, String url, String headersJson) {
+            new Thread(() -> {
+                HttpURLConnection c = null;
+                try {
+                    c = (HttpURLConnection) new URL(url).openConnection();
+                    c.setConnectTimeout(30000);
+                    c.setReadTimeout(180000);
+                    c.setRequestProperty("Accept-Encoding", "identity");
+                    if (headersJson != null && headersJson.length() > 2) {
+                        JSONObject h = new JSONObject(headersJson);
+                        Iterator<String> it = h.keys();
+                        while (it.hasNext()) {
+                            String k = it.next();
+                            String v = h.optString(k, "");
+                            if (v != null && v.length() > 0) c.setRequestProperty(k, v);
+                        }
+                    }
+                    int code = c.getResponseCode();
+                    if (code >= 400) {
+                        emit("window.__xiFetchError(" + JSONObject.quote(id) + ","
+                                + JSONObject.quote("HTTP " + code) + ");");
+                        return;
+                    }
+                    byte[] b = readBytes(c.getInputStream());
+                    emit("window.__xiFetched(" + JSONObject.quote(id) + ","
+                            + JSONObject.quote(Base64.encodeToString(b, Base64.NO_WRAP)) + ");");
+                } catch (Exception e) {
+                    emit("window.__xiFetchError(" + JSONObject.quote(id) + ","
+                            + JSONObject.quote(String.valueOf(e.getMessage())) + ");");
+                } finally {
+                    if (c != null) {
+                        try {
+                            c.disconnect();
+                        } catch (Exception ignored) {
+                        }
+                    }
+                }
+            }).start();
+        }
+
         private void doTranscribe(String id, String url, String apiKey, String model,
                                   String b64, String ext) {
             HttpURLConnection c = null;

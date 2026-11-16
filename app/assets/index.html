@@ -22,6 +22,12 @@
         <div class="t-main" id="tMain">新的对话</div>
         <div class="t-sub" id="tSub">记忆 0 页</div>
       </div>
+      <button class="icon-btn" id="btnDraw" aria-label="画图">
+        <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 20c3 0 4-2 6-4s8-8 8-11a3 3 0 0 0-4-1c-3 2-8 6-9 8"/>
+          <circle cx="18.5" cy="18.5" r="1.6"/>
+        </svg>
+      </button>
       <button class="icon-btn" id="btnMem" aria-label="记忆库">
         <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.6">
           <ellipse cx="12" cy="6" rx="7" ry="3"/>
@@ -200,6 +206,11 @@
         <input id="fStream" type="checkbox" class="sw">
       </label>
 
+      <div class="sec-title">图片</div>
+      <label class="field"><span>画图模型（和聊天分开配）</span>
+        <input id="fImgModel" type="text" placeholder="gpt-image-1 / dall-e-3 / Kwai-Kolors/Kolors" autocomplete="off" spellcheck="false">
+      </label>
+
       <div class="sec-title">外观</div>
       <label class="field"><span>主题</span>
         <select id="fTheme">
@@ -279,7 +290,44 @@
         同一段前缀重复发，缓存才命中——记忆和人格都放最前面就是为了这个。
       </p>
     </div>
+  </section>  <!-- ══════════ 画图 ══════════ -->
+  <section id="sheet-draw" class="sheet">
+    <header class="sheet-head">
+      <button class="icon-btn back" data-close="sheet-draw">
+        <svg viewBox="0 0 24 24" width="22" height="22"><path d="M15 5l-7 7 7 7" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="sheet-title">画一张</div>
+      <button class="icon-btn" id="btnDrawSave" aria-label="存到相册">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 4v11M8 11l4 4 4-4M5 19h14"/>
+        </svg>
+      </button>
+    </header>
+    <div class="sheet-body">
+      <label class="field"><span>画面描述</span>
+        <textarea id="drawPrompt" rows="3" placeholder="比如：深夜的机房，蓝色屏幕光，一只胖鲸鱼趴在键盘上"></textarea>
+      </label>
+      <div class="field-row">
+        <label class="field"><span>尺寸</span>
+          <select id="drawSize">
+            <option value="1024x1024">方形 1024</option>
+            <option value="1792x1024">横版 1792×1024</option>
+            <option value="1024x1792">竖版 1024×1792</option>
+          </select>
+        </label>
+        <label class="field"><span>张数</span>
+          <select id="drawN"><option value="1">1 张</option><option value="2">2 张</option></select>
+        </label>
+      </div>
+      <div class="row-actions">
+        <button class="btn-soft primary" id="btnDrawGo">生成</button>
+        <button class="btn-soft" id="btnDrawToChat">发到对话里</button>
+      </div>
+      <div id="drawOut" class="draw-out"></div>
+      <p class="hint">用的是设置里「图片」那一栏的模型，和聊天的模型分开配；接口地址和 Key 共用。</p>
+    </div>
   </section>
+
 </div>
 
 <script src="seed.js"></script>

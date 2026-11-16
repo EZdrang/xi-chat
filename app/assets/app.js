@@ -25,6 +25,7 @@
     voiceMode: 'ai',
     asrModel: 'whisper-1',
     theme: 'auto',
+    imageModel: 'gpt-image-1',
   };
 
   var PRESETS = [
@@ -548,6 +549,140 @@
       text: cleaned,
       dir: repo ? { repo: repo.replace(/\.git$/, ''), triggers: trg.trim() } : null,
     };
+  }
+
+  /* ════════════════════ 画图 ════════════════════ */
+
+  var DRAW = [];
+
+  function postJSON(url, body) {
+    return new Promise(function (resolve, reject) {
+      netPost(url, body, {
+        onData: function (raw) {
+          try { resolve(JSON.parse(raw)); } catch (e) { reject(new Error('接口返回不是 JSON')); }
+        },
+        onError: function (code, m) { reject(new Error(parseErr(code, m))); },
+        onDone: function () { },
+      }, false);
+    });
+  }
+
+  function extractImages(j) {
+    var out = [];
+    (j.data || []).forEach(function (d) {
+      if (typeof d === 'string') out.push({ url: d });
+      else if (d && d.b64_json) out.push({ b64: d.b64_json });
+      else if (d && d.url) out.push({ url: d.url });
+    });
+    (j.images || []).forEach(function (d) {
+      if (typeof d === 'string') out.push({ url: d });
+      else if (d && d.url) out.push({ url: d.url });
+      else if (d && d.b64_json) out.push({ b64: d.b64_json });
+    });
+    return out;
+  }
+
+  function fetchAsDataUrl(u) {
+    return new Promise(function (resolve, reject) {
+      if (!(window.XiNative && window.XiNative.fetchBase64)) {
+        return reject(new Error('浏览器预览取不了远程图，装到手机上用'));
+      }
+      var id = 'f' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+      window.__xiFetched = function (pid, b64) {
+        if (pid === id) resolve('data:image/png;base64,' + b64);
+      };
+      window.__xiFetchError = function (pid, m) {
+        if (pid === id) reject(new Error(m));
+      };
+      window.XiNative.fetchBase64(id, u, '{}');
+    });
+  }
+
+  function renderDraw() {
+    var box = $('drawOut');
+    if (!DRAW.length) {
+      box.innerHTML = '<div class="draw-empty">还没画过。</div>';
+      return;
+    }
+    box.innerHTML = DRAW.map(function (d) { return '<img src="' + d + '" alt="">'; }).join('');
+  }
+
+  function openDraw() {
+    if (!S.apiKey) {
+      toast('先填 API Key', 2000);
+      openSheet('sheet-set');
+      return;
+    }
+    renderDraw();
+    openSheet('sheet-draw');
+  }
+
+  async function generateImages() {
+    var prompt = $('drawPrompt').value.trim();
+    if (!prompt) { toast('先写点画面描述', 1600); return; }
+    if (!S.apiKey) { toast('先填 API Key', 2000); return; }
+
+    var url = (S.baseUrl || '').replace(/\/+$/, '') + '/images/generations';
+    var body = {
+      model: S.imageModel || 'gpt-image-1',
+      prompt: prompt,
+      n: parseInt($('drawN').value, 10) || 1,
+      size: $('drawSize').value || '1024x1024',
+      response_format: 'b64_json',
+    };
+
+    var btn = $('btnDrawGo');
+    var old = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '画着…';
+    try {
+      var j = await postJSON(url, body);
+      var imgs = extractImages(j);
+      if (!imgs.length) throw new Error('接口没返回图片（看看模型名对不对）');
+
+      var urls = [];
+      for (var i = 0; i < imgs.length; i++) {
+        if (imgs[i].b64) urls.push('data:image/png;base64,' + imgs[i].b64);
+        else if (imgs[i].url) urls.push(await fetchAsDataUrl(imgs[i].url));
+      }
+      DRAW = urls;
+      renderDraw();
+      toast('画好了，' + urls.length + ' 张', 1600);
+    } catch (e) {
+      toast('画图失败：' + String(e.message || e).slice(0, 120), 3800);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = old;
+    }
+  }
+
+  function saveDrawing() {
+    if (!DRAW.length) { toast('还没画', 1400); return; }
+    var d = DRAW[DRAW.length - 1];
+    var b64 = d.indexOf(',') >= 0 ? d.split(',')[1] : d;
+    var name = '汐-画-' + stamp() + '.png';
+    if (window.XiNative && window.XiNative.saveDownload) {
+      window.__xiSaved = function (id, p) { toast('已保存：' + p, 4200); };
+      window.__xiSaveError = function (id, m) { toast('保存失败：' + m, 2600); };
+      window.XiNative.saveDownload('dw' + Date.now(), name, b64);
+    } else {
+      toast('手机端才能存', 1600);
+    }
+  }
+
+  function drawToChat() {
+    if (!DRAW.length) { toast('先画一张', 1400); return; }
+    var p = $('drawPrompt').value.trim();
+    cur.messages.push({
+      role: 'assistant',
+      content: '（画好了：' + (p || '图') + '）',
+      images: DRAW.slice(),
+      ts: Date.now(),
+    });
+    saveCur();
+    renderChat();
+    closeSheet('sheet-draw');
+    toast('已放进对话', 1600);
   }
 
   /* ════════════════════ 渲染 ════════════════════ */
@@ -1538,6 +1673,7 @@
     $('fVoiceMode').value = S.voiceMode || 'ai';
     $('fAsr').value = S.asrModel || 'whisper-1';
     $('fTheme').value = S.theme || 'auto';
+    $('fImgModel').value = S.imageModel || 'gpt-image-1';
   }
 
   function readSettings() {
@@ -1558,6 +1694,7 @@
     S.voiceMode = $('fVoiceMode').value;
     S.asrModel = $('fAsr').value.trim() || 'whisper-1';
     S.theme = $('fTheme').value || 'auto';
+    S.imageModel = $('fImgModel').value.trim() || 'gpt-image-1';
     applyTheme();
     saveSettings();
   }
@@ -1864,6 +2001,10 @@
     });
     $('btnAttach').addEventListener('click', pickAttach);
     $('btnVoice').addEventListener('click', startVoice);
+    $('btnDraw').addEventListener('click', openDraw);
+    $('btnDrawGo').addEventListener('click', generateImages);
+    $('btnDrawSave').addEventListener('click', saveDrawing);
+    $('btnDrawToChat').addEventListener('click', drawToChat);
     $('ctx').addEventListener('click', function () {
       renderUsage();
       openSheet('sheet-usage');
@@ -2008,6 +2149,7 @@
     if (location.search.indexOf('view=mem') >= 0) { renderMemory(); openSheet('sheet-mem'); }
     if (location.search.indexOf('view=set') >= 0) { openSheet('sheet-set'); }
     if (location.search.indexOf('view=usage') >= 0) { renderUsage(); openSheet('sheet-usage'); }
+    if (location.search.indexOf('view=draw') >= 0) { renderDraw(); openSheet('sheet-draw'); }
   }
 
   function demo() {

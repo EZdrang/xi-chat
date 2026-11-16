@@ -70,28 +70,30 @@ const OUT = path.join(__dirname, '..', 'shots');
     await page.close();
   }
 
-  // 4) 发图片：选图 → 缩图 → chip
+  // 4) 发图片：走分块桥 → chip
   {
     const { page, errs } = await open('');
     const r = await page.evaluate(async () => {
       window.XiNative = {
-        pickFileBridge(id) { window.__p = id; },
+        pickAttachBridge(id) { window.__p = id; },
         env() { return JSON.stringify({ sdk: 34, device: 'Pixel-Test' }); },
         toast() { },
       };
-      document.getElementById('btnAttach').click();
+      document.getElementById('btnPickImage').click();
       const id = window.__p;
       const c = document.createElement('canvas');
-      c.width = 900; c.height = 600;
+      c.width = 900; c.height = 1600;   // 长截图
       const g = c.getContext('2d');
-      const grd = g.createLinearGradient(0, 0, 900, 600);
+      const grd = g.createLinearGradient(0, 0, 900, 1600);
       grd.addColorStop(0, '#2477c4');
       grd.addColorStop(1, '#a6d8f7');
-      g.fillStyle = grd; g.fillRect(0, 0, 900, 600);
+      g.fillStyle = grd; g.fillRect(0, 0, 900, 1600);
       g.fillStyle = '#fff'; g.font = 'bold 96px sans-serif';
-      g.fillText('肥鱼', 300, 340);
+      g.fillText('长截图', 300, 800);
       const b64 = c.toDataURL('image/png').split(',')[1];
-      await window.__xiPicked(id, '测试图.png', b64);
+      window.__xiFileStart(id + '#0', '测试图.png', 'image/png', 1, b64.length);
+      window.__xiFileChunk(id + '#0', 0, b64);
+      window.__xiFileEnd(id + '#0');
       await new Promise((r) => setTimeout(r, 700));
       const img = document.querySelector('#attachBar .chip img');
       return {
@@ -101,7 +103,7 @@ const OUT = path.join(__dirname, '..', 'shots');
       };
     });
     await shoot(page, 'attach');
-    report(r.chips === 1 && r.hasPreview && r.previewKind.startsWith('data:image/jpeg'), 'attach', r, errs);
+    report(r.chips === 1 && r.hasPreview && r.previewKind.startsWith('data:image/png'), 'attach', r, errs);
     await page.close();
   }
 

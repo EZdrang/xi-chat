@@ -56,7 +56,8 @@ ok('SOUL 含「汐」', vm.runInContext('window.MEM.get("SOUL.md").body.includes
 console.log('\n[3] 系统提示');
 const prompt = vm.runInContext('window.MEM.prompt({recalled: []})', ctx);
 ok('提示里有 SOUL', prompt.includes('SOUL.md'));
-ok('提示里有记忆全文', prompt.includes('记忆库全文') || prompt.includes('记忆索引'));
+ok('提示里有记忆目录', prompt.includes('记忆目录'));
+ok('开场不塞全文', prompt.length < 12000);
 ok('提示里有工作方式', prompt.includes('没有代码执行'));
 ok('提示里有写记忆通道', prompt.includes('xi-memory'));
 ok('提示长度合理', prompt.length > 800 && prompt.length < 20000, prompt.length);

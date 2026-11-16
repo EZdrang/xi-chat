@@ -2428,6 +2428,31 @@
     }
   };
 
+  /* 上下文账单：点一下底部那条，看清楚钱花在哪 */
+  function showCtxBreakdown() {
+    var soul = MEM.get('SOUL.md');
+    var soulLen = soul && soul.body ? soul.body.length : 0;
+    var promptLen = MEM.prompt({ recalled: [], skills: MEM.matchSkills('', 0), search: S.searchMode }).length;
+    var histLen = 0;
+    if (cur) {
+      cur.messages.forEach(function (m) {
+        if (m.hidden) return;
+        histLen += String(m.content || '').length;
+        if (m.images) histLen += m.images.length * 4000;
+      });
+    }
+    var tok = function (n) { return Math.round(n / 1.6); };
+    var rows = [
+      '人格 SOUL：' + tok(soulLen) + ' token',
+      '记忆库（目录 + 常驻页 + 技能）：' + tok(Math.max(0, promptLen - soulLen)) + ' token',
+      '这段对话：' + tok(histLen) + ' token',
+      '窗口：' + Math.round(S.ctxWindow / 1000) + 'k，到 ' + Math.round(S.compressAt * 100) + '% 自动压缩',
+      '',
+      '开场固定开销约 ' + tok(promptLen) + ' token（' + Math.round(promptLen / (S.ctxWindow * 1.6) * 100) + '%）',
+    ];
+    dialog('上下文构成', esc(rows.join('\n')), '好');
+  }
+
   function dialog(title, msg, okText, danger) {
     return new Promise(function (resolve) {
       var t = C();
@@ -2830,6 +2855,8 @@
       }
     });
     $('btnSelfCheck').addEventListener('click', selfCheck);
+    var ctxRow = document.querySelector('.ctx');
+    if (ctxRow) ctxRow.addEventListener('click', showCtxBreakdown);
     $('btnMenu').addEventListener('click', openDrawer);
     $('scrim').addEventListener('click', closeDrawer);
     $('btnNew').addEventListener('click', function () { closeDrawer(); newSession(); });

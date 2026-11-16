@@ -145,6 +145,21 @@
     ['', '根目录'],
   ];
 
+  /* 目录行：一页一行，给提示词用（比整份 index.md 干净得多） */
+  function indexLines() {
+    return state.pages
+      .filter(function (p) {
+        return p.path !== 'index.md' && p.path !== 'log.md';
+      })
+      .sort(function (a, b) {
+        return (Number(a.salience) || 2) - (Number(b.salience) || 2);
+      })
+      .map(function (p) {
+        var s = String(p.summary || '').replace(/\s+/g, ' ').slice(0, 56);
+        return '- ' + p.path + '（' + (p.title || '') + '）：' + s;
+      });
+  }
+
   function indexText() {
     var out = ['# Memory Index', '',
       '> 内容目录 / 路由表：每页一行 —— 链接 + 一句话摘要 + salience 标记。', ''];
@@ -625,7 +640,7 @@
     var parts = [];
 
     parts.push('你是「汐」——指挥官常驻的搭档，不是通用助手。下面是你的人格文件与记忆库，先读完，再开口。');
-    if (soul) parts.push('===== SOUL.md =====\n' + soul.body);
+    if (soul) parts.push('===== SOUL.md =====\n' + String(soul.body || '').slice(0, 8000));
 
     // 热页：偏好与语气微调，每轮都带——人格可以慢慢长，但不许被一次对话冲掉
     ['user/preferences.md', 'identity/style.md'].forEach(function (p) {
@@ -635,26 +650,35 @@
           pg.body.slice(0, 1000));
       }
     });
-    if (mem) parts.push('===== MEMORY.md（记忆库协议）=====\n' + mem.body.slice(0, 2600));
+    if (mem) {
+      // 协议只留「能做什么」，全文留在库里自己翻——每轮带全文纯属烧上下文
+      parts.push('===== 记忆库用法 =====\n' +
+        '记忆是 markdown 页：SOUL.md 是人格，index.md 是目录，每个主题一页。你可以直接改写任何页（含 SOUL），' +
+        '改完会记进 log.md。要具体规则就看 index.md 里指到的那页。');
+    }
 
     if (opts.skills && opts.skills.length) {
       parts.push('===== 技能（这类对话怎么处理，优先于默认风格）=====\n' +
         opts.skills.map(function (p) {
-          return '### ' + p.path + '（' + (p.title || '') + '）\n' + (p.body || '').slice(0, 1400);
+          return '### ' + p.path + '（' + (p.title || '') + '）\n' + (p.body || '').slice(0, 1200);
         }).join('\n\n'));
     }
 
     if (opts.index !== false) {
-      // 记忆库不大的时候，直接把全文塞给她——这样她才看得见该改哪一页，而不是靠摘要瞎猜
-      var bytes = state.pages.reduce(function (a, p) { return a + (p.body || '').length; }, 0);
-      if (bytes <= 40000) {
-        parts.push('===== 记忆库全文（' + state.pages.length + ' 页，改之前先读你要改的那页）=====\n' +
-          state.pages.map(function (p) {
-            return '### ' + p.path + '（' + (p.title || '') + '）\n' + (p.body || '');
-          }).join('\n\n'));
-      } else {
-        parts.push('===== 记忆索引（库太大，按需召回）=====\n' + indexText().slice(0, 4000));
-      }
+      // 只给目录（一页一行），正文按需——这就是开场那 15% 的主要来源
+      parts.push('===== 记忆目录 =====\n' + indexLines().join('\n'));
+      var hot = state.pages.filter(function (p) {
+        return Number(p.salience) === 1 &&
+          ['SOUL.md', 'MEMORY.md', 'BOOTSTRAP.md', 'index.md', 'log.md'].indexOf(p.path) < 0;
+      }).slice(0, 3);
+      var budget = 2400;
+      var used = 0;
+      hot.forEach(function (p) {
+        if (used >= budget) return;
+        var body = String(p.body || '').slice(0, budget - used);
+        parts.push('===== ' + p.path + '（常驻）=====\n' + body);
+        used += body.length;
+      });
     }
 
     if (opts.recalled && opts.recalled.length) {

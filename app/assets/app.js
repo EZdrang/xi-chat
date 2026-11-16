@@ -55,6 +55,7 @@
   var pendingFind = '';
   var pendingSearch = '';
   var pendingCtx = false;
+  var pendingHint = '';
   var renderLimits = {};   // 会话 id → 渲染多少条（长会话懒加载）
   var pendingReq = {};    // id -> handlers
   var reqSeq = 0;
@@ -712,13 +713,13 @@
     try {
       var hits = await webSearch(kw);
       if (!hits.length) {
-        sess.messages.push({ role: 'system', hidden: true, content: '【搜索「' + kw + '」没有结果】' });
+        sess.messages.push({ role: 'user', hidden: true, content: '【搜索「' + kw + '」没有结果】' });
       } else {
         var lines = hits.map(function (h, i) {
           return (i + 1) + '. ' + h.title + '\n   ' + h.url + '\n   ' + h.snippet;
         });
         sess.messages.push({
-          role: 'system', hidden: true,
+          role: 'user', hidden: true,
           content: '【网页搜索「' + kw + '」的结果】\n' + lines.join('\n') +
             '\n\n基于这些写答案，引用就用上面的链接；结果不够就直说，别编。',
         });
@@ -726,7 +727,7 @@
       }
     } catch (e) {
       sess.messages.push({
-        role: 'system', hidden: true,
+        role: 'user', hidden: true,
         content: '【搜索「' + kw + '」失败：' + ((e && e.message) || e) + '】\n如实告诉指挥官搜不了，别编内容。',
       });
     }
@@ -745,7 +746,7 @@
     refreshEnv();
     var line = envLine();
     sess.messages.push({
-      role: 'system', hidden: true,
+      role: 'user', hidden: true,
       content: line
         ? '【此刻的处境】\n' + line + '\n按这个说实话，别编时间地点。'
         : '【此刻的处境】拿不到设备信息（没授权或读取失败），如实说不知道。',
@@ -776,10 +777,10 @@
       return '- ' + it.full_name + ' ★' + it.stargazers_count + '：' + String(it.description || '').slice(0, 70);
     });
     if (!items.length) {
-      sess.messages.push({ role: 'system', hidden: true, content: '【GitHub 搜索「' + kw + '」没有结果】换个说法再搜，或者直接向指挥官要链接。' });
+      sess.messages.push({ role: 'user', hidden: true, content: '【GitHub 搜索「' + kw + '」没有结果】换个说法再搜，或者直接向指挥官要链接。' });
     } else {
       sess.messages.push({
-        role: 'system', hidden: true,
+        role: 'user', hidden: true,
         content: '【GitHub 搜索「' + kw + '」的结果】\n' + items.join('\n') +
           '\n\n要装哪个就输出 xi-skill 块（repo: owner/repo），别把整段结果念给指挥官。',
       });
@@ -921,7 +922,9 @@
 
   function refreshHeader() {
     $('tMain').textContent = cur ? (cur.title || '新的对话') : '新的对话';
-    var n = cur ? cur.messages.filter(function (m) { return m.role === 'user' || m.role === 'assistant'; }).length : 0;
+    var n = cur ? cur.messages.filter(function (m) {
+      return !m.hidden && (m.role === 'user' || m.role === 'assistant');
+    }).length : 0;
     var st = MEM.stats();
     $('tSub').textContent = n + ' 条 · 记忆 ' + st.pages + ' 页';
     var ms = $('memStat');
@@ -1773,7 +1776,23 @@
         out.push({ role: m.role, content: m.content });
       }
     });
-    return out;
+
+    // 兜底：保证开头是 system/user、且 user 与 assistant 交替，否则接口会 400
+    var clean = [];
+    out.forEach(function (m) {
+      var prev = clean[clean.length - 1];
+      if (prev && prev.role === m.role && m.role !== 'system') {
+        if (typeof prev.content === 'string' && typeof m.content === 'string') {
+          prev.content = prev.content + '\n\n' + m.content;
+        } else {
+          clean.push(m);
+        }
+        return;
+      }
+      clean.push(m);
+    });
+    while (clean.length && clean[0].role === 'assistant') clean.shift();
+    return clean;
   }
 
   async function send() {
@@ -1824,9 +1843,15 @@
       if (S.compress) await maybeCompress();
       await runChat(sess);
       var hops = 0;
-      while (hops < 2 && (pendingSearch || pendingFind || pendingCtx)) {
+      while (hops < 2 && (pendingSearch || pendingFind || pendingCtx || pendingHint)) {
         hops++;
-        if (pendingCtx) {
+        if (pendingHint) {
+          var hint = pendingHint;
+          pendingHint = '';
+          sess.messages.push({ role: 'user', hidden: true, content: '【App 注入】' + hint });
+          await saveCur();
+          await runChat(sess);
+        } else if (pendingCtx) {
           pendingCtx = false;
           await continueWithContext(sess);
         } else if (pendingSearch) {
@@ -1927,6 +1952,7 @@
         pendingFind = '';
         pendingSearch = '';
         pendingCtx = false;
+        pendingHint = '';
         if (msg.content) {
           var cd = extractContextDirective(msg.content);
           if (cd.want) {
@@ -1937,7 +1963,14 @@
           if (sd.kw) {
             msg.content = sd.text;
             // 只有本地搜索开着时才走回环；内置联网由服务端处理，别在这儿空转
-            if (S.searchMode === 'custom' || S.searchMode === 'duck') pendingSearch = sd.kw;
+            if (S.searchMode === 'custom' || S.searchMode === 'duck') {
+              pendingSearch = sd.kw;
+            } else if (msg.content.replace(/\s/g, '').length < 12) {
+              // 她把话说完就等结果了——别让她干等，补一句接着答
+              pendingHint = S.searchMode === 'native'
+                ? '服务端已经开了联网，你直接回答就会带引用，不需要任何搜索指令。现在接着答，别让指挥官干等。'
+                : '这台机器没开联网，你搜不了。直接说搜不了，或者凭记忆回答。';
+            }
           }
           var fd = extractFindDirective(msg.content);
           if (fd.kw) {

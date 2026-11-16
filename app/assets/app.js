@@ -551,6 +551,79 @@
     };
   }
 
+  /* ════════════════════ 余额 ════════════════════ */
+
+  var BAL = null;
+
+  function getJSON(url) {
+    return new Promise(function (resolve, reject) {
+      if (!(window.XiNative && window.XiNative.http)) return reject(new Error('no bridge'));
+      var id = 'b' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+      pendingReq[id] = {
+        onData: function (raw) {
+          try { resolve(JSON.parse(raw)); } catch (e) { reject(new Error('返回不是 JSON')); }
+        },
+        onError: function (code, m) { reject(new Error(parseErr(code, m))); },
+        onDone: function () { },
+      };
+      var hdr = { Authorization: 'Bearer ' + (S.apiKey || '').trim() };
+      // 空 body → 原生走 GET
+      window.XiNative.http(id, url, JSON.stringify(hdr), '', false);
+    });
+  }
+
+  function money(cur, v) {
+    if (v == null || isNaN(v)) return '--';
+    return (cur === 'USD' ? '$' : '¥') + v.toFixed(2);
+  }
+
+  async function refreshBalance() {
+    if (!S || !S.apiKey) { BAL = null; renderBalance(); return; }
+    var root = (S.baseUrl || '').replace(/\/+$/, '').replace(/\/v\d+$/, '');
+    try {
+      var j = await getJSON(root + '/user/balance');
+      var infos = j.balance_infos || (j.data && j.data.balance_infos) || [];
+      if (infos.length) {
+        var c = infos[0] || {};
+        BAL = {
+          cur: c.currency || 'CNY',
+          total: parseFloat(c.total_balance),
+          granted: parseFloat(c.granted_balance) || 0,
+          topped: parseFloat(c.topped_up_balance) || 0,
+        };
+      } else if (j.balance != null) {
+        BAL = { cur: 'CNY', total: parseFloat(j.balance), granted: 0, topped: 0 };
+      } else {
+        BAL = null;
+      }
+    } catch (e) {
+      BAL = null;
+    }
+    renderBalance();
+  }
+
+  function renderBalance() {
+    var txt = '余额 --';
+    if (BAL && !isNaN(BAL.total)) {
+      txt = '余额 ' + money(BAL.cur, BAL.total);
+      if (BAL.granted > 0) txt += '（赠 ' + money(BAL.cur, BAL.granted) + '）';
+    }
+    var el = $('balance');
+    if (el) el.textContent = txt;
+
+    var row = $('balRow');
+    if (row) {
+      if (BAL && !isNaN(BAL.total)) {
+        row.innerHTML = '余额：<b class="' + (BAL.total < 0 ? 'neg' : '') + '">' +
+          money(BAL.cur, BAL.total) + '</b>' +
+          (BAL.granted ? ' · 赠送 ' + money(BAL.cur, BAL.granted) : '') +
+          (BAL.topped ? ' · 充值 ' + money(BAL.cur, BAL.topped) : '');
+      } else {
+        row.textContent = '余额：不可用（接口不支持查询，或 Key 没权限）';
+      }
+    }
+  }
+
   /* ════════════════════ 画图 ════════════════════ */
 
   var DRAW = [];
@@ -692,7 +765,8 @@
     var n = cur ? cur.messages.filter(function (m) { return m.role === 'user' || m.role === 'assistant'; }).length : 0;
     var st = MEM.stats();
     $('tSub').textContent = n + ' 条 · 记忆 ' + st.pages + ' 页';
-    $('memStat').textContent = '记忆 ' + st.pages + ' 页';
+    var ms = $('memStat');
+    if (ms) ms.textContent = '记忆 ' + st.pages + ' 页';
     var hasMsgs = n > 0;
     $('empty').classList.toggle('show', !hasMsgs);
   }
@@ -1250,16 +1324,17 @@
     });
   }
 
-  function pickAttach() {
+  function pickAttach(kind) {
     if (!(window.XiNative && window.XiNative.pickFileBridge)) {
       toast('浏览器里选不了文件，装到手机上用', 2200);
       return;
     }
     var id = 'at' + (++attSeq) + Date.now().toString(36);
+    var wantImage = kind === 'image';
     window.__xiPicked = async function (pid, name, b64) {
       if (pid !== id) return;
       try {
-        if (IMG_EXT.test(name)) {
+        if (wantImage || IMG_EXT.test(name)) {
           var raw = 'data:' + mimeOf(name) + ';base64,' + b64;
           var shrunk = await shrinkImage(raw, 1280, 0.82);
           ATTS.push({ id: id + '-' + ATTS.length, kind: 'image', name: name, preview: shrunk, dataUrl: shrunk, size: shrunk.length });
@@ -1277,7 +1352,7 @@
     };
     window.__xiPickCancelled = function () { };
     window.__xiPickError = function (i, m) { toast('读取失败：' + m, 2600); };
-    window.XiNative.pickFileBridge(id);
+    window.XiNative.pickFileBridge(id, wantImage ? 'image/*' : '*/*');
   }
 
   function draftContent() {
@@ -1977,6 +2052,7 @@
       closeSheet('sheet-set');
       updateCtx();
       refreshHeader();
+      refreshBalance();
       toast('设置已保存', 1400);
     });
 
@@ -1999,9 +2075,12 @@
     $('btnSend').addEventListener('click', function () {
       if (busy) stopChat(); else send();
     });
-    $('btnAttach').addEventListener('click', pickAttach);
+    $('btnAttach').addEventListener('click', function () { pickAttach('file'); });
+    $('btnPickImage').addEventListener('click', function () { pickAttach('image'); });
     $('btnVoice').addEventListener('click', startVoice);
-    $('btnDraw').addEventListener('click', openDraw);
+    $('btnOpenDraw').addEventListener('click', function () { closeSheet('sheet-set'); setTimeout(openDraw, 260); });
+    $('btnRefreshBal').addEventListener('click', refreshBalance);
+    $('balance').addEventListener('click', refreshBalance);
     $('btnDrawGo').addEventListener('click', generateImages);
     $('btnDrawSave').addEventListener('click', saveDrawing);
     $('btnDrawToChat').addEventListener('click', drawToChat);
@@ -2134,6 +2213,8 @@
     }
     renderSessions();
     refreshHeader();
+    renderBalance();
+    refreshBalance();
 
     var env = '';
     try {
@@ -2183,6 +2264,7 @@
   window.__xi = {
     send: send, MEM: MEM, installSkill: installSkill,
     extractSkillDirective: extractSkillDirective,
-    get S() { return S; }, get cur() { return cur; },
+    openDraw: openDraw, refreshBalance: refreshBalance,
+    get S() { return S; }, get cur() { return cur; }, get BAL() { return BAL; },
   };
 })();

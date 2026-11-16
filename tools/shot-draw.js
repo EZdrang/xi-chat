@@ -52,7 +52,7 @@ const OUT = path.join(__dirname, '..', 'docs');
     window.__xi.S.apiKey = 'test-key';
     window.__xi.S.imageModel = 'gpt-image-1';
 
-    document.getElementById('btnDraw').click();
+    window.__xi.openDraw();
     await new Promise((r) => setTimeout(r, 400));
     document.getElementById('drawPrompt').value = '深夜机房，胖鲸鱼趴在键盘上';
     document.getElementById('drawSize').value = '1024x1024';

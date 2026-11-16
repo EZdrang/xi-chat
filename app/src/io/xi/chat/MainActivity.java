@@ -284,11 +284,26 @@ public class MainActivity extends Activity {
     // ------------------------------------------------------------------
     // File picking
     // ------------------------------------------------------------------
-    void pickFile(String id) {
+    void pickFile(String id, String mime) {
         pickId = id;
-        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-        i.addCategory(Intent.CATEGORY_OPENABLE);
-        i.setType("*/*");
+        boolean img = mime != null && mime.startsWith("image/");
+        Intent i;
+        if (img) {
+            // 走系统相册 / 照片选择器，而不是「文件」应用
+            if (Build.VERSION.SDK_INT >= 33) {
+                i = new Intent(android.provider.MediaStore.ACTION_PICK_IMAGES);
+                i.setType("image/*");
+            } else {
+                i = new Intent(Intent.ACTION_PICK,
+                        android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI);
+                i.setType("image/*");
+                i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            }
+        } else {
+            i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            i.addCategory(Intent.CATEGORY_OPENABLE);
+            i.setType(mime == null || mime.isEmpty() ? "*/*" : mime);
+        }
         try {
             startActivityForResult(i, REQ_PICK);
         } catch (Exception e) {
@@ -319,12 +334,19 @@ public class MainActivity extends Activity {
         }
         final String id = pickId;
         pickId = null;
-        if (res != RESULT_OK || data == null || data.getData() == null) {
+        if (res != RESULT_OK || data == null) {
             emit("window.__xiPickCancelled(" + JSONObject.quote(id) + ")");
             return;
         }
-        final Uri uri = data.getData();
-        final String name = queryName(uri);
+        final Uri uri = data.getData() != null
+                ? data.getData()
+                : (data.getClipData() != null && data.getClipData().getItemCount() > 0
+                    ? data.getClipData().getItemAt(0).getUri() : null);
+        if (uri == null) {
+            emit("window.__xiPickCancelled(" + JSONObject.quote(id) + ")");
+            return;
+        }
+        final String name = withExt(queryName(uri), getContentResolver().getType(uri));
         new Thread(() -> {
             try {
                 byte[] bytes = readBytes(getContentResolver().openInputStream(uri));
@@ -336,6 +358,27 @@ public class MainActivity extends Activity {
                         + JSONObject.quote(String.valueOf(e.getMessage())) + ");");
             }
         }).start();
+    }
+
+    private static String extOf(String mime) {
+        if (mime == null) return "";
+        if (mime.startsWith("image/")) {
+            String s = mime.substring(6).toLowerCase();
+            if (s.equals("jpeg")) return "jpg";
+            if (s.equals("svg+xml")) return "svg";
+            return s;
+        }
+        if ("application/pdf".equals(mime)) return "pdf";
+        if (mime.startsWith("text/")) return "txt";
+        return "";
+    }
+
+    /** 相册返回的名字经常没有扩展名，补一个，否则前端会当二进制附件 */
+    private static String withExt(String name, String mime) {
+        if (name == null) name = "file";
+        if (name.indexOf('.') >= 0) return name;
+        String ext = extOf(mime);
+        return ext.isEmpty() ? name : name + "." + ext;
     }
 
     private String queryName(Uri uri) {
@@ -517,8 +560,8 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
-        public void pickFileBridge(String id) {
-            MainActivity.this.pickFile(id);
+        public void pickFileBridge(String id, String mime) {
+            MainActivity.this.pickFile(id, mime);
         }
 
         @JavascriptInterface

@@ -585,6 +585,16 @@ body::before {
 .bal-row .neg { color: var(--danger); }
 
 
+/* 时间分隔（微信那种） */
+.time-sep {
+  align-self: center; margin: 10px 0 2px;
+  font-size: 11px; color: var(--label-3);
+  padding: 2px 10px; border-radius: 999px;
+  background: rgba(28, 50, 107, .05);
+  font-variant-numeric: tabular-nums;
+}
+[data-theme="dark"] .time-sep { background: rgba(150, 185, 255, .08); color: var(--label-3); }
+
 /* 长会话懒加载 */
 .load-more {
   display: block; width: 100%; margin: 4px 0 10px;

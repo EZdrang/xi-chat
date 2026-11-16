@@ -793,6 +793,30 @@
     return wrap;
   }
 
+  function timeLabel(ts) {
+    var d = new Date(ts || Date.now());
+    var now = new Date();
+    var p = function (n) { return (n < 10 ? '0' : '') + n; };
+    var hm = p(d.getHours()) + ':' + p(d.getMinutes());
+    if (d.toDateString() === now.toDateString()) return hm;
+    var y = new Date(now.getTime() - 86400000);
+    if (d.toDateString() === y.toDateString()) return '昨天 ' + hm;
+    return (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + hm;
+  }
+
+  function needTimeSep(prevTs, ts) {
+    if (!ts) return false;           // 老消息没有时间戳，不标
+    if (!prevTs) return true;        // 一段的开头标一个
+    return Math.abs(ts - prevTs) >= 5 * 60 * 1000;
+  }
+
+  function timeSepNode(ts) {
+    var el = document.createElement('div');
+    el.className = 'time-sep';
+    el.textContent = timeLabel(ts);
+    return el;
+  }
+
   function renderChat() {
     var box = $('msgs');
     box.innerHTML = '';
@@ -812,17 +836,19 @@
       });
       box.appendChild(more);
     }
-    box.dataset.start = String(start);
-    box.dataset.more = start > 0 ? '1' : '0';
 
-    for (var i = start; i < total; i++) box.appendChild(msgNode(cur.messages[i], i));
+    for (var i = start; i < total; i++) {
+      var m = cur.messages[i];
+      var prev = i > 0 ? cur.messages[i - 1].ts : 0;
+      if (needTimeSep(prev, m.ts)) box.appendChild(timeSepNode(m.ts || Date.now()));
+      box.appendChild(msgNode(m, i));
+    }
 
     // 切回正在流式输出的那条会话：把气泡重新接上，继续往下刷
     if (streamCtx && streamCtx.sess === cur) {
       var si = cur.messages.indexOf(streamCtx.msg);
-      var offset = (start > 0 ? 1 : 0);
-      var sn = si >= start ? box.children[si - start + offset] : null;
-      if (sn && sn.classList.contains('msg')) streamCtx.rebind(sn);
+      var sn = si >= 0 ? box.querySelector('.msg[data-idx="' + si + '"]') : null;
+      if (sn) streamCtx.rebind(sn);
     }
     refreshHeader();
     updateCtx();
@@ -831,8 +857,11 @@
 
   function appendMsg(m) {
     var index = cur.messages.indexOf(m);
+    var box = $('msgs');
+    var prev = index > 0 ? cur.messages[index - 1].ts : 0;
+    if (needTimeSep(prev, m.ts)) box.appendChild(timeSepNode(m.ts || Date.now()));
     var el = msgNode(m, index);
-    $('msgs').appendChild(el);
+    box.appendChild(el);
     $('empty').classList.remove('show');
     scrollBottom();
     return el;

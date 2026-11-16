@@ -645,8 +645,16 @@
     }
 
     if (opts.index !== false) {
-      var idx = indexText();
-      parts.push('===== 记忆索引（有哪些记忆页）=====\n' + idx.slice(0, 4000));
+      // 记忆库不大的时候，直接把全文塞给她——这样她才看得见该改哪一页，而不是靠摘要瞎猜
+      var bytes = state.pages.reduce(function (a, p) { return a + (p.body || '').length; }, 0);
+      if (bytes <= 40000) {
+        parts.push('===== 记忆库全文（' + state.pages.length + ' 页，改之前先读你要改的那页）=====\n' +
+          state.pages.map(function (p) {
+            return '### ' + p.path + '（' + (p.title || '') + '）\n' + (p.body || '');
+          }).join('\n\n'));
+      } else {
+        parts.push('===== 记忆索引（库太大，按需召回）=====\n' + indexText().slice(0, 4000));
+      }
     }
 
     if (opts.recalled && opts.recalled.length) {

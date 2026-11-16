@@ -21,3 +21,8 @@ tmp-*
 .DS_Store
 Thumbs.db
 *.log
+
+# 本地 token（绝不提交）
+.gh-token
+*.token
+

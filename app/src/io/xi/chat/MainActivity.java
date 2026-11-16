@@ -608,9 +608,67 @@ public class MainActivity extends Activity {
                 o.put("sdk", Build.VERSION.SDK_INT);
                 o.put("pkg", getPackageName());
                 o.put("device", Build.MANUFACTURER + " " + Build.MODEL);
+                o.put("now", System.currentTimeMillis());
+                o.put("tz", java.util.TimeZone.getDefault().getID());
+
+                android.os.BatteryManager bm = (android.os.BatteryManager)
+                        getSystemService(android.content.Context.BATTERY_SERVICE);
+                if (bm != null) {
+                    int pct = bm.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY);
+                    if (pct >= 0) o.put("battery", pct);
+                    int st = bm.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_STATUS);
+                    o.put("charging", st == android.os.BatteryManager.BATTERY_STATUS_CHARGING
+                            || st == android.os.BatteryManager.BATTERY_STATUS_FULL);
+                }
+
+                android.net.ConnectivityManager cm = (android.net.ConnectivityManager)
+                        getSystemService(android.content.Context.CONNECTIVITY_SERVICE);
+                android.net.NetworkInfo ni = cm == null ? null : cm.getActiveNetworkInfo();
+                if (ni != null && ni.isConnected()) {
+                    o.put("net", ni.getType() == android.net.ConnectivityManager.TYPE_WIFI ? "wifi" : "cellular");
+                } else {
+                    o.put("net", "offline");
+                }
+
+                // 位置：只在授权后读，拿粗定位够用
+                if (checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION)
+                        == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    android.location.LocationManager lm = (android.location.LocationManager)
+                            getSystemService(android.content.Context.LOCATION_SERVICE);
+                    android.location.Location last = null;
+                    try {
+                        last = lm.getLastKnownLocation(android.location.LocationManager.NETWORK_PROVIDER);
+                    } catch (Exception ignored) {
+                    }
+                    if (last == null) {
+                        try {
+                            last = lm.getLastKnownLocation(android.location.LocationManager.GPS_PROVIDER);
+                        } catch (Exception ignored) {
+                        }
+                    }
+                    if (last != null) {
+                        o.put("lat", Math.round(last.getLatitude() * 1000) / 1000.0);
+                        o.put("lon", Math.round(last.getLongitude() * 1000) / 1000.0);
+                        o.put("acc", Math.round(last.getAccuracy()));
+                        o.put("fixAge", (System.currentTimeMillis() - last.getTime()) / 60000);
+                    }
+                }
+                o.put("hasLocationPerm",
+                        checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION)
+                                == android.content.pm.PackageManager.PERMISSION_GRANTED);
             } catch (Exception ignored) {
             }
             return o.toString();
+        }
+
+        @JavascriptInterface
+        public void askLocation() {
+            runOnUiThread(() -> {
+                if (Build.VERSION.SDK_INT >= 23) {
+                    requestPermissions(new String[]{
+                            android.Manifest.permission.ACCESS_COARSE_LOCATION}, 4301);
+                }
+            });
         }
 
         @JavascriptInterface

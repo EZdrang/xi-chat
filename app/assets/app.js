@@ -31,6 +31,7 @@
     searchModel: 'deepseek-flash',
     searchUrl: '',
     searchKey: '',
+    envOn: true,
   };
 
   var PRESETS = [
@@ -964,6 +965,38 @@
     return wrap;
   }
 
+  /* 此刻的处境：时间、电量、网络、位置——让她知道你在哪、几点、什么状态 */
+  var ENV = null;
+
+  function refreshEnv() {
+    try {
+      ENV = (window.XiNative && window.XiNative.env) ? JSON.parse(window.XiNative.env()) : null;
+    } catch (e) {
+      ENV = null;
+    }
+  }
+
+  function envLine() {
+    if (!ENV) return '';
+    var d = new Date(ENV.now || Date.now());
+    var wd = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][d.getDay()];
+    var p = function (n) { return (n < 10 ? '0' : '') + n; };
+    var s = '【此刻】' + d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' +
+      p(d.getHours()) + ':' + p(d.getMinutes()) + ' ' + wd +
+      (ENV.tz ? '（' + ENV.tz + '）' : '');
+    if (ENV.battery != null) s += ' · 电量 ' + ENV.battery + '%' + (ENV.charging ? '，充电中' : '');
+    if (ENV.net) s += ' · 网络 ' + ENV.net;
+    if (ENV.device) s += ' · 设备 ' + ENV.device;
+    if (ENV.lat != null) {
+      s += ' · 位置约 ' + ENV.lat + ',' + ENV.lon + '（精度 ±' + ENV.acc + ' 米';
+      if (ENV.fixAge > 5) s += '，' + ENV.fixAge + ' 分钟前';
+      s += '）';
+    } else if (ENV.hasLocationPerm === false) {
+      s += ' · 位置未授权';
+    }
+    return s;
+  }
+
   function timeLabel(ts) {
     var d = new Date(ts || Date.now());
     var now = new Date();
@@ -1682,6 +1715,10 @@
     if (sess.summary) {
       out.push({ role: 'system', content: '【早前对话的压缩摘要】\n' + sess.summary });
     }
+    if (S.envOn !== false) {
+      var el = envLine();
+      if (el) out.push({ role: 'system', content: el });
+    }
     if (S.searchMode === 'native') {
       out.push({ role: 'system', content: '【本机已开启 DeepSeek 内置联网：服务端会自动搜索并带引用，你直接回答就行，不用输出 xi-search 块。】' });
     }
@@ -1743,6 +1780,7 @@
     busy = true;
     aborted = false;
     setSendState('stop');
+    refreshEnv();
     await saveCur();
     updateCtx();
 
@@ -2229,6 +2267,11 @@
     $('fSearchModel').value = S.searchModel || 'deepseek-flash';
     $('fSearchUrl').value = S.searchUrl || '';
     $('fSearchKey').value = S.searchKey || '';
+    $('fEnvOn').checked = S.envOn !== false;
+    refreshEnv();
+    $('locHint').textContent = ENV && ENV.lat != null
+      ? '位置：已授权（' + ENV.lat + ',' + ENV.lon + '）'
+      : (ENV && ENV.hasLocationPerm ? '位置：已授权，暂无定位' : '位置：未授权');
   }
 
   function readSettings() {
@@ -2255,6 +2298,7 @@
     S.searchModel = $('fSearchModel').value.trim() || 'deepseek-flash';
     S.searchUrl = $('fSearchUrl').value.trim();
     S.searchKey = $('fSearchKey').value.trim();
+    S.envOn = $('fEnvOn').checked;
     applyTheme();
     saveSettings();
   }
@@ -2522,6 +2566,14 @@
   function bindUI() {
     bindScrollStick();
     bindSearch();
+    $('btnAskLoc').addEventListener('click', function () {
+      if (window.XiNative && window.XiNative.askLocation) {
+        window.XiNative.askLocation();
+        toast('授权后回来这里看状态', 2200);
+      } else {
+        toast('手机端才能授权', 2000);
+      }
+    });
     $('btnMenu').addEventListener('click', openDrawer);
     $('scrim').addEventListener('click', closeDrawer);
     $('btnNew').addEventListener('click', function () { closeDrawer(); newSession(); });
@@ -2707,7 +2759,7 @@
     scheduleBalance(true);
 
     // 回前台 / 每分钟，都顺手刷一次余额
-    window.__xiResume = function () { scheduleBalance(); };
+    window.__xiResume = function () { refreshEnv(); scheduleBalance(); };
     setInterval(function () {
       if (!document.hidden) scheduleBalance();
     }, 60000);

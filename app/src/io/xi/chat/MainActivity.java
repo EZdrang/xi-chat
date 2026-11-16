@@ -11,6 +11,10 @@ import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
 import android.media.MediaRecorder;
 import android.net.Uri;
 import android.os.Build;
@@ -71,11 +75,16 @@ public class MainActivity extends Activity {
     private String recId;
     private String pendingRecId;
     private String pickMode;
+
+    private long stepBase = -1;
+    private long stepNow = -1;
+    private String stepDay = "";
     private final Handler ui = new Handler(Looper.getMainLooper());
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        initSteps();
 
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(0xFF061320);
@@ -458,6 +467,60 @@ public class MainActivity extends Activity {
         }).start();
     }
 
+    /** 步数传感器计的是开机以来的总数，自己维护一个当日基线 */
+    private void initSteps() {
+        try {
+            SensorManager sm = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+            Sensor st = sm == null ? null : sm.getDefaultSensor(Sensor.TYPE_STEP_COUNTER);
+            if (st == null) return;
+            sm.registerListener(new SensorEventListener() {
+                @Override
+                public void onSensorChanged(SensorEvent e) {
+                    long v = (long) e.values[0];
+                    String today = new java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US)
+                            .format(new java.util.Date());
+                    android.content.SharedPreferences sp = getSharedPreferences("xi", MODE_PRIVATE);
+                    long base = sp.getLong("stepBase", -1);
+                    String day = sp.getString("stepDay", "");
+                    if (base < 0 || !today.equals(day) || v < base) {
+                        base = v;
+                        sp.edit().putLong("stepBase", base).putString("stepDay", today).apply();
+                    }
+                    stepBase = base;
+                    stepNow = v;
+                    stepDay = today;
+                }
+
+                @Override
+                public void onAccuracyChanged(Sensor s, int a) { }
+            }, st, SensorManager.SENSOR_DELAY_NORMAL);
+        } catch (Exception ignored) {
+        }
+    }
+
+    /** 今天屏幕亮了多久（分钟）。没有使用情况访问权限时会返回 -2 */
+    private long screenMinutesToday() {
+        try {
+            android.app.usage.UsageStatsManager usm = (android.app.usage.UsageStatsManager)
+                    getSystemService(Context.USAGE_STATS_SERVICE);
+            if (usm == null) return -1;
+            java.util.Calendar c = java.util.Calendar.getInstance();
+            c.set(java.util.Calendar.HOUR_OF_DAY, 0);
+            c.set(java.util.Calendar.MINUTE, 0);
+            c.set(java.util.Calendar.SECOND, 0);
+            c.set(java.util.Calendar.MILLISECOND, 0);
+            java.util.List<android.app.usage.UsageStats> list = usm.queryUsageStats(
+                    android.app.usage.UsageStatsManager.INTERVAL_DAILY,
+                    c.getTimeInMillis(), System.currentTimeMillis());
+            if (list == null || list.isEmpty()) return -2;
+            long total = 0;
+            for (android.app.usage.UsageStats u : list) total += u.getTotalTimeInForeground();
+            return total / 60000;
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+
     void pickFile(String id, String mime) {
         pickId = id;
         boolean img = mime != null && mime.startsWith("image/");
@@ -656,6 +719,20 @@ public class MainActivity extends Activity {
                 o.put("hasLocationPerm",
                         checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION)
                                 == android.content.pm.PackageManager.PERMISSION_GRANTED);
+
+                // 步数（当天）
+                boolean stepOk = Build.VERSION.SDK_INT < 29
+                        || checkSelfPermission("android.permission.ACTIVITY_RECOGNITION")
+                        == android.content.pm.PackageManager.PERMISSION_GRANTED;
+                o.put("hasStepPerm", stepOk);
+                if (stepNow >= 0 && stepBase >= 0 && stepOk) {
+                    o.put("steps", Math.max(0, stepNow - stepBase));
+                }
+
+                // 屏幕使用时长
+                long sm = screenMinutesToday();
+                o.put("hasUsagePerm", sm != -2);
+                if (sm >= 0) o.put("screenMin", sm);
             } catch (Exception ignored) {
             }
             return o.toString();
@@ -667,6 +744,29 @@ public class MainActivity extends Activity {
                 if (Build.VERSION.SDK_INT >= 23) {
                     requestPermissions(new String[]{
                             android.Manifest.permission.ACCESS_COARSE_LOCATION}, 4301);
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public void askActivity() {
+            runOnUiThread(() -> {
+                if (Build.VERSION.SDK_INT >= 29) {
+                    requestPermissions(new String[]{"android.permission.ACTIVITY_RECOGNITION"}, 4302);
+                } else {
+                    Toast.makeText(MainActivity.this, "这个系统不需要额外授权", Toast.LENGTH_SHORT).show();
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public void openUsageSettings() {
+            runOnUiThread(() -> {
+                try {
+                    startActivity(new Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS));
+                } catch (Exception e) {
+                    Toast.makeText(MainActivity.this, "打不开设置，手动去使用情况访问里给权限",
+                            Toast.LENGTH_LONG).show();
                 }
             });
         }

@@ -987,6 +987,12 @@
     if (ENV.battery != null) s += ' · 电量 ' + ENV.battery + '%' + (ENV.charging ? '，充电中' : '');
     if (ENV.net) s += ' · 网络 ' + ENV.net;
     if (ENV.device) s += ' · 设备 ' + ENV.device;
+    if (ENV.steps != null) s += ' · 今日步数 ' + ENV.steps;
+    if (ENV.screenMin != null) {
+      s += ' · 今日亮屏约 ' + (ENV.screenMin >= 60
+        ? (Math.floor(ENV.screenMin / 60) + ' 小时 ' + (ENV.screenMin % 60) + ' 分')
+        : (ENV.screenMin + ' 分钟'));
+    }
     if (ENV.lat != null) {
       s += ' · 位置约 ' + ENV.lat + ',' + ENV.lon + '（精度 ±' + ENV.acc + ' 米';
       if (ENV.fixAge > 5) s += '，' + ENV.fixAge + ' 分钟前';
@@ -2269,9 +2275,11 @@
     $('fSearchKey').value = S.searchKey || '';
     $('fEnvOn').checked = S.envOn !== false;
     refreshEnv();
-    $('locHint').textContent = ENV && ENV.lat != null
-      ? '位置：已授权（' + ENV.lat + ',' + ENV.lon + '）'
-      : (ENV && ENV.hasLocationPerm ? '位置：已授权，暂无定位' : '位置：未授权');
+    var parts = [];
+    parts.push(ENV && ENV.lat != null ? '位置已授权' : (ENV && ENV.hasLocationPerm ? '位置已授权（暂无定位）' : '位置未授权'));
+    parts.push(ENV && ENV.hasStepPerm ? '步数已授权' : '步数未授权');
+    parts.push(ENV && ENV.hasUsagePerm ? '使用情况已授权' : '使用情况未授权');
+    $('locHint').textContent = parts.join(' · ');
   }
 
   function readSettings() {
@@ -2570,6 +2578,18 @@
       if (window.XiNative && window.XiNative.askLocation) {
         window.XiNative.askLocation();
         toast('授权后回来这里看状态', 2200);
+      } else {
+        toast('手机端才能授权', 2000);
+      }
+    });
+    $('btnAskStep').addEventListener('click', function () {
+      if (window.XiNative && window.XiNative.askActivity) window.XiNative.askActivity();
+      else toast('手机端才能授权', 2000);
+    });
+    $('btnAskUsage').addEventListener('click', function () {
+      if (window.XiNative && window.XiNative.openUsageSettings) {
+        window.XiNative.openUsageSettings();
+        toast('在系统设置里给「汐」打开使用情况访问', 3000);
       } else {
         toast('手机端才能授权', 2000);
       }

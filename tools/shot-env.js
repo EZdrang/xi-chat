@@ -38,6 +38,7 @@ const BASE = 'http://127.0.0.1:8787/index.html';
           sdk: 34, device: 'Xiaomi 2211133C', now, tz: 'Asia/Shanghai',
           battery: 84, charging: true, net: 'cellular',
           lat: 31.23, lon: 121.47, acc: 45, fixAge: 2, hasLocationPerm: true,
+          steps: 3842, hasStepPerm: true, screenMin: 96, hasUsagePerm: true,
         });
       },
       pickAttachBridge() { }, pickFileBridge() { }, saveDownload() { },
@@ -65,12 +66,14 @@ const BASE = 'http://127.0.0.1:8787/index.html';
       hasCharging: envMsg.includes('充电中'),
       hasNet: envMsg.includes('cellular'),
       hasLoc: envMsg.includes('31.23') && envMsg.includes('±45'),
+      hasSteps: envMsg.includes('今日步数 3842'),
+      hasScreen: envMsg.includes('今日亮屏约 1 小时 36 分'),
       text: envMsg.slice(0, 120),
     };
   });
 
   const ok = r.hasEnv && r.hasTime && r.hasWeek && r.hasBattery && r.hasCharging &&
-    r.hasNet && r.hasLoc && errs.length === 0;
+    r.hasNet && r.hasLoc && r.hasSteps && r.hasScreen && errs.length === 0;
 
   console.log((ok ? '✓' : '✗') + ' 处境 ' + JSON.stringify(r));
   if (errs.length) console.log('   err:', errs[0]);

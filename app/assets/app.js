@@ -954,7 +954,8 @@
         '<div class="bubble">' + think + media +
           '<div class="md">' + md + '</div>' +
         '</div>' +
-        '<div class="meta">' + ug +
+        '<div class="meta">' +
+          '<span class="mt">' + timeLabel(m.ts) + '</span>' + ug +
           '<button data-act="copy">复制</button>' +
           (isMe ? '' : '<button data-act="regen">重说</button>') +
           '<button data-act="del">删除</button>' +
@@ -971,13 +972,17 @@
     if (d.toDateString() === now.toDateString()) return hm;
     var y = new Date(now.getTime() - 86400000);
     if (d.toDateString() === y.toDateString()) return '昨天 ' + hm;
-    return (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + hm;
+    if (d.getFullYear() === now.getFullYear()) {
+      return (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + hm;
+    }
+    return d.getFullYear() + '年' + (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + hm;
   }
 
+  /* 只在天数变化时插一条分隔，时间本身挂在每条消息的 meta 里 */
   function needTimeSep(prevTs, ts) {
-    if (!ts) return false;           // 老消息没有时间戳，不标
-    if (!prevTs) return true;        // 一段的开头标一个
-    return Math.abs(ts - prevTs) >= 5 * 60 * 1000;
+    if (!ts) return false;
+    if (!prevTs) return true;
+    return new Date(ts).toDateString() !== new Date(prevTs).toDateString();
   }
 
   function timeSepNode(ts) {
@@ -1972,6 +1977,96 @@
     if (currentReq) currentReq.abort();
   }
 
+  /* ════════════════════ 搜聊天记录 ════════════════════ */
+
+  var searchTimer = null;
+
+  function bindSearch() {
+    var q = $('qSearch');
+    if (!q) return;
+    q.addEventListener('input', function () {
+      clearTimeout(searchTimer);
+      var kw = q.value.trim();
+      searchTimer = setTimeout(function () {
+        if (kw) runSessionSearch(kw);
+        else renderSessions();
+      }, 260);
+    });
+  }
+
+  async function runSessionSearch(kw) {
+    var low = kw.toLowerCase();
+    var hits = [];
+    for (var i = 0; i < sessions.length && hits.length < 60; i++) {
+      var s = await kvGet('s:' + sessions[i].id);
+      if (!s || !s.messages) continue;
+      for (var j = s.messages.length - 1; j >= 0 && hits.length < 60; j--) {
+        var m = s.messages[j];
+        if (m.hidden || !m.content) continue;
+        var pos = m.content.toLowerCase().indexOf(low);
+        if (pos < 0) continue;
+        hits.push({
+          sid: s.id,
+          idx: j,
+          role: m.role,
+          title: s.title || '未命名',
+          snippet: m.content.slice(Math.max(0, pos - 26), pos + kw.length + 46),
+        });
+      }
+    }
+    renderSearchHits(hits, kw);
+  }
+
+  function renderSearchHits(hits, kw) {
+    var box = $('sessions');
+    box.innerHTML = '';
+    if (!hits.length) {
+      box.innerHTML = '<div class="sess-empty">没有聊到过「' + esc(kw) + '」</div>';
+      return;
+    }
+    var head = document.createElement('div');
+    head.className = 'sess-empty';
+    head.textContent = '找到 ' + hits.length + ' 条';
+    box.appendChild(head);
+
+    hits.forEach(function (h) {
+      var el = document.createElement('button');
+      el.className = 'hit';
+      var snip = esc(h.snippet).replace(new RegExp(escReg(kw), 'gi'), function (t) {
+        return '<b>' + t + '</b>';
+      });
+      el.innerHTML = '<div class="ht">' + esc(h.title) + ' · ' + (h.role === 'user' ? '我' : '汐') + '</div>' +
+        '<div class="hs">' + snip + '</div>';
+      el.addEventListener('click', function () {
+        openSession(h.sid).then(function () {
+          setTimeout(function () { revealHit(h.idx); }, 140);
+        });
+      });
+      box.appendChild(el);
+    });
+  }
+
+  function revealHit(idx) {
+    if (!cur) return;
+    var need = cur.messages.length - idx + 8;
+    if (!renderLimits[cur.id] || renderLimits[cur.id] < need) {
+      renderLimits[cur.id] = Math.max(need, 80);
+    }
+    renderChat();
+    requestAnimationFrame(function () {
+      var el = document.querySelector('#msgs .msg[data-idx="' + idx + '"]');
+      if (!el) return;
+      el.scrollIntoView({ block: 'center' });
+      stickBottom = false;
+      el.classList.add('flash');
+      setTimeout(function () { el.classList.remove('flash'); }, 1700);
+    });
+  }
+
+  function escReg(s) {
+    return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
   /* ════════════════════ 抽屉 / Sheet ════════════════════ */
 
   function openDrawer() {
@@ -2426,6 +2521,7 @@
 
   function bindUI() {
     bindScrollStick();
+    bindSearch();
     $('btnMenu').addEventListener('click', openDrawer);
     $('scrim').addEventListener('click', closeDrawer);
     $('btnNew').addEventListener('click', function () { closeDrawer(); newSession(); });
@@ -2667,6 +2763,7 @@
     send: send, MEM: MEM, installSkill: installSkill,
     extractSkillDirective: extractSkillDirective,
     refreshBalance: refreshBalance,
+    saveCur: saveCur, renderChat: renderChat,
     get S() { return S; }, get cur() { return cur; }, get BAL() { return BAL; },
   };
 })();

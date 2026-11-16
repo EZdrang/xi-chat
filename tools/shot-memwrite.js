@@ -41,6 +41,7 @@ const BASE = 'http://127.0.0.1:8787/index.html';
       'type: skill',
       'salience: 2',
       'summary: 直接叫元首，不解释。',
+      'triggers: [元首, 称呼]',
       '---',
       '直接叫。',
       '```',
@@ -98,6 +99,9 @@ const BASE = 'http://127.0.0.1:8787/index.html';
       skillExists: !!window.__xi.MEM.get('skills/称呼.md'),
       soulBody: (window.__xi.MEM.get('SOUL.md') || {}).body || '',
       soulLogged: window.__xi.MEM.logText().includes('改写了自己的 SOUL'),
+      skillTriggered: (window.__xi.MEM.matchSkills('元首今天怎么样') || []).some(function (p) {
+        return p.path === 'skills/称呼.md';
+      }),
       blockStripped: lastAi ? !lastAi.content.includes('xi-memory') : false,
       shown: lastAi ? lastAi.content.slice(0, 30) : '',
       balanceCalls: calls.filter((u) => /user\/balance/.test(u)).length,
@@ -106,7 +110,7 @@ const BASE = 'http://127.0.0.1:8787/index.html';
   });
 
   const ok = r.after >= r.before + 2 && r.prefBody.includes('元首') && r.skillExists &&
-    r.soulBody.includes('这一版是我自己改的') && r.soulLogged &&
+    r.soulBody.includes('这一版是我自己改的') && r.soulLogged && r.skillTriggered &&
     r.blockStripped && r.balanceCalls >= 1 && r.ctxBal === '¥12.34' && errs.length === 0;
 
   console.log((ok ? '✓' : '✗') + ' 写记忆/余额 ' + JSON.stringify(r));

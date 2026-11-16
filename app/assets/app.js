@@ -1082,8 +1082,6 @@
     for (var i = start; i < total; i++) {
       var m = cur.messages[i];
       if (m.hidden) continue;
-      var prev = i > 0 ? cur.messages[i - 1].ts : 0;
-      if (needTimeSep(prev, m.ts)) box.appendChild(timeSepNode(m.ts || Date.now()));
       box.appendChild(msgNode(m, i));
     }
 
@@ -1101,8 +1099,6 @@
   function appendMsg(m) {
     var index = cur.messages.indexOf(m);
     var box = $('msgs');
-    var prev = index > 0 ? cur.messages[index - 1].ts : 0;
-    if (needTimeSep(prev, m.ts)) box.appendChild(timeSepNode(m.ts || Date.now()));
     var el = msgNode(m, index);
     box.appendChild(el);
     $('empty').classList.remove('show');
@@ -1741,7 +1737,11 @@
       recalled = MEM.recall(lastUser, 3);
       out.push({
         role: 'system',
-        content: MEM.prompt({ recalled: recalled, skills: MEM.matchSkills(lastUser, 2) }),
+        content: MEM.prompt({
+      recalled: recalled,
+      skills: MEM.matchSkills(lastUser, 2),
+      search: S.searchMode || 'off',
+    }),
       });
     } else {
       out.push({ role: 'system', content: '你是汐，中文，先结论后理由，简短务实。' });
@@ -1936,7 +1936,8 @@
           var sd = extractSearchDirective(msg.content);
           if (sd.kw) {
             msg.content = sd.text;
-            pendingSearch = sd.kw;
+            // 只有本地搜索开着时才走回环；内置联网由服务端处理，别在这儿空转
+            if (S.searchMode === 'custom' || S.searchMode === 'duck') pendingSearch = sd.kw;
           }
           var fd = extractFindDirective(msg.content);
           if (fd.kw) {

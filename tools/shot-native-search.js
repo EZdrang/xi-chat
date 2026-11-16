@@ -19,16 +19,18 @@ const BASE = 'http://127.0.0.1:8787/index.html';
   const r = await page.evaluate(async () => {
     const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     let body = null;
+    const searchCalls = [];
 
     window.XiNative = {
       http(id, url, hdr, payload) {
         if (/chat\/completions/.test(url)) {
           body = JSON.parse(payload);
-          window.__xiNet(id, { t: 'c', d: JSON.stringify({ choices: [{ delta: { content: '冰岛人口约 39.4 万。' } }] }) });
+          window.__xiNet(id, { t: 'c', d: JSON.stringify({ choices: [{ delta: { content: '冰岛人口约 39.4 万。\n```xi-search\n冰岛人口\n```' } }] }) });
           window.__xiNet(id, { t: 'c', d: '[DONE]' });
           window.__xiNet(id, { t: 'd' });
           return;
         }
+        if (/search|duckduckgo|api\.github/.test(url)) searchCalls.push(url);
         window.__xiNet(id, { t: 'c', d: '{}' });
         window.__xiNet(id, { t: 'd' });
       },
@@ -53,12 +55,17 @@ const BASE = 'http://127.0.0.1:8787/index.html';
       tools: body && (body.tools || []).map((t) => t.type),
       hasTemp: body ? 'temperature' in body : null,
       sysHasNativeNote: body ? JSON.stringify(body.messages).includes('内置联网') : false,
+      searchCalls: searchCalls.length,
+      lastAi: (window.__xi.cur.messages.filter((m) => m.role === 'assistant').pop() || {}).content || '',
+      hiddenNoResult: window.__xi.cur.messages.some((m) => m.hidden && String(m.content).includes('没有结果')),
     };
   });
 
   const ok = r.model === 'deepseek-flash' &&
     r.tools && r.tools.includes('deepseek_web_search') && r.tools.includes('deepseek_read_url') &&
-    r.hasTemp === false && r.sysHasNativeNote && errs.length === 0;
+    r.hasTemp === false && r.sysHasNativeNote &&
+    r.searchCalls === 0 && r.hiddenNoResult === false &&
+    !r.lastAi.includes('xi-search') && errs.length === 0;
 
   console.log((ok ? '✓' : '✗') + ' 内置联网 ' + JSON.stringify(r));
   if (errs.length) console.log('   err:', errs[0]);

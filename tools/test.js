@@ -190,5 +190,16 @@ ok('计数正确', sync.counts.merge === 1 && sync.counts.conflict === 1 &&
 ok('基线正确推进（b 不再被覆盖）', sync.acts2['proj/b.md'] === 'local-ahead', sync.acts2['proj/b.md']);
 ok('合并结果不会被旧 zip 冲掉', sync.acts2['proj/a.md'] === 'local-ahead', sync.acts2['proj/a.md']);
 
+console.log('\n[11] 样式完整性');
+{
+  const css = fs.readFileSync(path.join(A, 'style.css'), 'utf8');
+  const darkCount = (css.match(/\[data-theme="dark"\]/g) || []).length;
+  ok('深色主题规则在（>20 条）', darkCount > 20, '实际 ' + darkCount);
+  ok('toast 样式在', css.includes('.toast {'));
+  ok('注释成对', (css.split('/*').length - 1) === (css.split('*/').length - 1),
+    '开 ' + (css.split('/*').length - 1) + ' / 闭 ' + (css.split('*/').length - 1));
+  ok('没有被吞掉的收尾', css.trim().length > 20000, css.trim().length + ' 字节');
+}
+
 console.log(`\n结果：${pass} 通过 / ${fail} 失败\n`);
 process.exit(fail ? 1 : 0);

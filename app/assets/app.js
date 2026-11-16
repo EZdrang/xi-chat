@@ -25,6 +25,7 @@
     voiceMode: 'ai',
     asrModel: 'whisper-1',
     theme: 'auto',
+    visionModel: '',
   };
 
   var PRESETS = [
@@ -1229,14 +1230,64 @@
           ATTS.push({ id: id + '-' + ATTS.length, kind: 'file', name: name, text: null, size: Math.round(b64.length * 0.75) });
         }
         renderAtts();
-        toast('已添加 ' + name, 1300);
+      } catch (e) {
+        toast('读取失败：' + e.message, 2600);
+      }
+    };
+    window.__xiPickedMeta = function (pid, name, size) {
+      if (pid !== id) return;
+      ATTS.push({ id: id + '-' + ATTS.length, kind: 'file', name: name, text: null, size: size });
+      renderAtts();
+      toast('文件较大，只带文件名（' + Math.round(size / 1024) + ' KB）', 2600);
+    };
+    window.__xiPickCancelled = function () { };
+    window.__xiPickError = function (i, m) { toast('读取失败：' + m, 2600); };
+    window.XiNative.pickFileBridge(id, wantImage ? 'image/*' : '*/*');
+  }
+
+  /* 当前会话里有没有带图的消息 */
+  function hasImages() {
+    if (!cur) return false;
+    return cur.messages.some(function (m) {
+      return m.role === 'user' && m.images && m.images.length;
+    });
+  }
+
+  /* 没填视觉模型时提醒一次：很多模型收到图会直接忽略或塞占位符 */
+  function maybeWarnVision() {
+    if (S.visionModel || maybeWarnVision.done) return;
+    maybeWarnVision.done = true;
+    toast('没填「视觉模型」，图片可能被接口忽略；设置里补一个', 3800);
+  }
+
+  /* 多选图片：原生侧已经缩好图，这里直接进附件 */
+  function pickImages() {
+    if (!(window.XiNative && window.XiNative.pickImagesBridge)) {
+      toast('浏览器里选不了图，装到手机上用', 2200);
+      return;
+    }
+    var id = 'im' + (++attSeq) + Date.now().toString(36);
+    window.__xiImagesPicked = function (pid, json) {
+      if (pid !== id) return;
+      try {
+        var list = JSON.parse(json) || [];
+        list.forEach(function (it, i) {
+          var url = 'data:image/jpeg;base64,' + it.b64;
+          ATTS.push({
+            id: id + '-' + i, kind: 'image',
+            name: it.name || ('图片' + (i + 1)),
+            preview: url, dataUrl: url, size: it.b64.length,
+          });
+        });
+        renderAtts();
+        maybeWarnVision();
       } catch (e) {
         toast('读取失败：' + e.message, 2600);
       }
     };
     window.__xiPickCancelled = function () { };
     window.__xiPickError = function (i, m) { toast('读取失败：' + m, 2600); };
-    window.XiNative.pickFileBridge(id, wantImage ? 'image/*' : '*/*');
+    window.XiNative.pickImagesBridge(id);
   }
 
   function draftContent() {
@@ -1432,7 +1483,7 @@
       }
 
       var body = {
-        model: S.model,
+        model: (hasImages() && S.visionModel) ? S.visionModel : S.model,
         messages: buildMessages(),
         stream: !!S.stream,
       };
@@ -1632,6 +1683,7 @@
     $('fVoiceMode').value = S.voiceMode || 'ai';
     $('fAsr').value = S.asrModel || 'whisper-1';
     $('fTheme').value = S.theme || 'auto';
+    $('fVisionModel').value = S.visionModel || '';
   }
 
   function readSettings() {
@@ -1652,6 +1704,7 @@
     S.voiceMode = $('fVoiceMode').value;
     S.asrModel = $('fAsr').value.trim() || 'whisper-1';
     S.theme = $('fTheme').value || 'auto';
+    S.visionModel = $('fVisionModel').value.trim();
     applyTheme();
     saveSettings();
   }
@@ -1958,7 +2011,7 @@
       if (busy) stopChat(); else send();
     });
     $('btnAttach').addEventListener('click', function () { pickAttach('file'); });
-    $('btnPickImage').addEventListener('click', function () { pickAttach('image'); });
+    $('btnPickImage').addEventListener('click', pickImages);
     $('btnVoice').addEventListener('click', startVoice);
     $('btnRefreshBal').addEventListener('click', refreshBalance);
     $('ctxBal').addEventListener('click', function (e) {

@@ -9,6 +9,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.media.MediaRecorder;
 import android.net.Uri;
 import android.os.Build;
@@ -51,6 +53,12 @@ public class MainActivity extends Activity {
     private static final int REQ_PICK = 4201;
     private static final int REQ_VOICE = 4202;
     private static final int REQ_REC_PERM = 4203;
+    private static final int REQ_PICK_IMAGES = 4204;
+
+    /** 超过这个大小就不把内容过桥，只带文件名（否则 base64 会把 WebView 撑爆） */
+    private static final int MAX_BRIDGE_BYTES = 3 * 1024 * 1024;
+    private static final int MAX_IMG_SIDE = 1280;
+    private static final int MAX_PICK_IMAGES = 6;
     private WebView web;
     private Bridge bridge;
     private String pickId;
@@ -284,6 +292,61 @@ public class MainActivity extends Activity {
     // ------------------------------------------------------------------
     // File picking
     // ------------------------------------------------------------------
+    /** 多选图片：相册里挑，Java 端先缩到 1280 再传，避免大图爆桥 */
+    void pickImages(String id) {
+        pickId = id;
+        Intent i;
+        if (Build.VERSION.SDK_INT >= 33) {
+            i = new Intent(android.provider.MediaStore.ACTION_PICK_IMAGES);
+            i.setType("image/*");
+            i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+            i.putExtra(android.provider.MediaStore.EXTRA_PICK_IMAGES_MAX, MAX_PICK_IMAGES);
+        } else {
+            i = new Intent(Intent.ACTION_GET_CONTENT);
+            i.setType("image/*");
+            i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+            i.addCategory(Intent.CATEGORY_OPENABLE);
+            i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        }
+        try {
+            startActivityForResult(i, REQ_PICK_IMAGES);
+        } catch (Exception e) {
+            emit("window.__xiPickCancelled(" + JSONObject.quote(id) + ")");
+        }
+    }
+
+    private String imageB64(Uri uri) throws Exception {
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        java.io.InputStream in0 = getContentResolver().openInputStream(uri);
+        BitmapFactory.decodeStream(in0, null, bounds);
+        if (in0 != null) in0.close();
+        int w = bounds.outWidth, h = bounds.outHeight;
+        if (w <= 0 || h <= 0) throw new java.io.IOException("不是有效图片");
+
+        int sample = 1;
+        while (Math.max(w, h) / sample > MAX_IMG_SIDE * 2) sample *= 2;
+
+        BitmapFactory.Options opt = new BitmapFactory.Options();
+        opt.inSampleSize = sample;
+        java.io.InputStream in1 = getContentResolver().openInputStream(uri);
+        Bitmap bmp = BitmapFactory.decodeStream(in1, null, opt);
+        if (in1 != null) in1.close();
+        if (bmp == null) throw new java.io.IOException("解码失败");
+
+        int mw = bmp.getWidth(), mh = bmp.getHeight();
+        float s = Math.min(1f, MAX_IMG_SIDE / (float) Math.max(mw, mh));
+        if (s < 1f) {
+            Bitmap scaled = Bitmap.createScaledBitmap(bmp, Math.round(mw * s), Math.round(mh * s), true);
+            if (scaled != bmp) bmp.recycle();
+            bmp = scaled;
+        }
+        ByteArrayOutputStream bo = new ByteArrayOutputStream();
+        bmp.compress(Bitmap.CompressFormat.JPEG, 82, bo);
+        bmp.recycle();
+        return Base64.encodeToString(bo.toByteArray(), Base64.NO_WRAP);
+    }
+
     void pickFile(String id, String mime) {
         pickId = id;
         boolean img = mime != null && mime.startsWith("image/");
@@ -328,6 +391,42 @@ public class MainActivity extends Activity {
             emit("window.__xiVoiceCancel(" + JSONObject.quote(id) + ");");
             return;
         }
+        if (req == REQ_PICK_IMAGES) {
+            final String iid = pickId;
+            pickId = null;
+            if (res != RESULT_OK || data == null) {
+                emit("window.__xiPickCancelled(" + JSONObject.quote(iid) + ")");
+                return;
+            }
+            final ArrayList<Uri> uris = new ArrayList<>();
+            if (data.getClipData() != null) {
+                int n = Math.min(data.getClipData().getItemCount(), MAX_PICK_IMAGES);
+                for (int k = 0; k < n; k++) uris.add(data.getClipData().getItemAt(k).getUri());
+            } else if (data.getData() != null) {
+                uris.add(data.getData());
+            }
+            if (uris.isEmpty()) {
+                emit("window.__xiPickCancelled(" + JSONObject.quote(iid) + ")");
+                return;
+            }
+            new Thread(() -> {
+                try {
+                    org.json.JSONArray arr = new org.json.JSONArray();
+                    for (Uri u : uris) {
+                        org.json.JSONObject o = new org.json.JSONObject();
+                        o.put("name", withExt(queryName(u), "image/jpeg"));
+                        o.put("b64", imageB64(u));
+                        arr.put(o);
+                    }
+                    emit("window.__xiImagesPicked(" + JSONObject.quote(iid) + ","
+                            + JSONObject.quote(arr.toString()) + ");");
+                } catch (Exception e) {
+                    emit("window.__xiPickError(" + JSONObject.quote(iid) + ","
+                            + JSONObject.quote(String.valueOf(e.getMessage())) + ");");
+                }
+            }).start();
+            return;
+        }
         if (req != REQ_PICK) {
             super.onActivityResult(req, res, data);
             return;
@@ -350,6 +449,12 @@ public class MainActivity extends Activity {
         new Thread(() -> {
             try {
                 byte[] bytes = readBytes(getContentResolver().openInputStream(uri));
+                if (bytes.length > MAX_BRIDGE_BYTES) {
+                    // 太大就不过桥，只告诉前端文件名和大小，避免 WebView 被 base64 撑爆
+                    emit("window.__xiPickedMeta(" + JSONObject.quote(id) + "," + JSONObject.quote(name)
+                            + "," + bytes.length + ");");
+                    return;
+                }
                 String b64 = Base64.encodeToString(bytes, Base64.NO_WRAP);
                 emit("window.__xiPicked(" + JSONObject.quote(id) + "," + JSONObject.quote(name)
                         + "," + JSONObject.quote(b64) + ");");
@@ -562,6 +667,11 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void pickFileBridge(String id, String mime) {
             MainActivity.this.pickFile(id, mime);
+        }
+
+        @JavascriptInterface
+        public void pickImagesBridge(String id) {
+            MainActivity.this.pickImages(id);
         }
 
         @JavascriptInterface

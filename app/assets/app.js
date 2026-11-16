@@ -56,6 +56,48 @@
   var pendingSearch = '';
   var pendingCtx = false;
   var pendingHint = '';
+  var pendingRetry = false;
+  var imagesStripped = false;
+  var repairMode = false;
+
+  /* 把会话历史修成接口能接受的样子：开头不能是 assistant，同角色不能相邻 */
+  function normalizeSession(sess) {
+    var out = [];
+    sess.messages.forEach(function (m) {
+      if (m.role !== 'user' && m.role !== 'assistant') {
+        out.push(m);
+        return;
+      }
+      var prev = null;
+      for (var i = out.length - 1; i >= 0; i--) {
+        if (out[i].role === 'user' || out[i].role === 'assistant') { prev = out[i]; break; }
+      }
+      if (!prev && m.role === 'assistant') return;
+      if (prev && prev.role === m.role) {
+        if (m.role === 'user') {
+          prev.content = (prev.content || '') + '\n\n' + (m.content || '');
+          if (m.display) prev.display = (prev.display || prev.content) + '\n\n' + m.display;
+          if (m.images && m.images.length) prev.images = (prev.images || []).concat(m.images);
+        }
+        return;
+      }
+      out.push(m);
+    });
+    sess.messages = out;
+  }
+
+  /* 把历史里所有图片摘掉（接口不认的格式会让整条请求 400） */
+  function stripImages(sess) {
+    var n = 0;
+    sess.messages.forEach(function (m) {
+      if (m.images && m.images.length) {
+        m.imagesBad = m.images.length;
+        m.images = [];
+        n++;
+      }
+    });
+    return n;
+  }
   var renderLimits = {};   // 会话 id → 渲染多少条（长会话懒加载）
   var pendingReq = {};    // id -> handlers
   var reqSeq = 0;
@@ -1836,6 +1878,7 @@
       out.push({ role: 'system', content: '【本机已开启 DeepSeek 内置联网：服务端会自动搜索并带引用，你直接回答就行，不用输出 xi-search 块。】' });
     }
     sess.messages.forEach(function (m) {
+      if (repairMode) return;   // 修复模式只带最后一条用户消息
       if (m.hidden && m.role === 'system') {
         out.push({ role: 'system', content: m.content });
         return;
@@ -1844,25 +1887,53 @@
       if (m.role === 'user' && m.images && m.images.length) {
         var parts = [];
         if (m.content) parts.push({ type: 'text', text: m.content });
+        var kept = 0;
         m.images.forEach(function (u) {
-          parts.push({ type: 'image_url', image_url: { url: u } });
+          // 只发接口认的格式；历史里混进来的坏图就地丢掉，别把整条请求拖死
+          if (/^data:image\/(jpeg|png|webp|gif);base64,/i.test(u)) {
+            parts.push({ type: 'image_url', image_url: { url: u } });
+            kept++;
+          }
         });
+        if (!kept && !m.content) return;
+        if (!kept && m.content) parts.push({ type: 'text', text: '（这张图格式不支持，已略过）' });
         out.push({ role: 'user', content: parts });
       } else if (m.content) {
         out.push({ role: m.role, content: m.content });
       }
     });
 
+    if (repairMode) {
+      // 历史结构被接口拒了：只带最后一条用户消息，保证能回话
+      for (var ri = sess.messages.length - 1; ri >= 0; ri--) {
+        if (sess.messages[ri].role === 'user' && !sess.messages[ri].hidden) {
+          out.push({
+            role: 'user',
+            content: sess.messages[ri].display || sess.messages[ri].content || '（继续）',
+          });
+          break;
+        }
+      }
+    }
+
     // 兜底：保证开头是 system/user、且 user 与 assistant 交替，否则接口会 400
+    function mergeInto(prev, m) {
+      var a = prev.content;
+      var b = m.content;
+      if (typeof a === 'string' && typeof b === 'string') {
+        prev.content = a + '\n\n' + b;
+        return;
+      }
+      var pa = Array.isArray(a) ? a : [{ type: 'text', text: String(a) }];
+      var pb = Array.isArray(b) ? b : [{ type: 'text', text: String(b) }];
+      prev.content = pa.concat(pb);
+    }
+
     var clean = [];
     out.forEach(function (m) {
       var prev = clean[clean.length - 1];
       if (prev && prev.role === m.role && m.role !== 'system') {
-        if (typeof prev.content === 'string' && typeof m.content === 'string') {
-          prev.content = prev.content + '\n\n' + m.content;
-        } else {
-          clean.push(m);
-        }
+        mergeInto(prev, m);
         return;
       }
       clean.push(m);
@@ -1915,9 +1986,18 @@
     updateCtx();
 
     var sess = cur;
+    imagesStripped = false;
+    repairMode = false;
     try {
       if (S.compress) await maybeCompress();
       await runChat(sess);
+      if (pendingRetry) {
+        pendingRetry = false;
+        toast(repairMode
+          ? '这段历史接口读不了，先用最近一条重发'
+          : '历史里有张图接口不认，已经跳过重试', 2800);
+        await runChat(sess);
+      }
       var hops = 0;
       while (hops < 2 && (pendingSearch || pendingFind || pendingCtx || pendingHint)) {
         hops++;
@@ -2015,6 +2095,18 @@
             sess.messages.pop();
             if (el) el.remove();
             dropped = true;
+            if (/unsupported image/i.test(err) && !imagesStripped) {
+              // 历史里混着坏图：剥掉再试一次，别让这条会话废掉
+              imagesStripped = true;
+              stripImages(sess);
+              pendingRetry = true;
+            } else if (/must follow a user message|invalid.*message|sequence/i.test(err) && !repairMode) {
+              // 历史结构被拒：就地修好再存一份，然后用最近一条重试
+              normalizeSession(sess);
+              if (cur === sess) { renderChat(); saveCur(); }
+              repairMode = true;
+              pendingRetry = true;
+            }
             if (cur === sess) toast('请求失败：' + err, 3200);
           }
         } else {

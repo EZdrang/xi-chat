@@ -556,6 +556,47 @@
     }
   }
 
+  /* 从回复里捞「写记忆」指令块：```xi-memory path=user/x.md ... ``` */
+  function extractMemoryDirectives(text) {
+    var re = /```xi-memory([^\n]*)\n([\s\S]*?)```/g;
+    var out = [];
+    var m;
+    while ((m = re.exec(text))) {
+      var head = m[1] || '';
+      var path = (head.match(/path=([^\s]+)/) || [])[1] || '';
+      out.push({
+        raw: m[0],
+        path: path.replace(/^[\/\\]+/, ''),
+        del: /delete/.test(head),
+        body: m[2] || '',
+      });
+    }
+    return out;
+  }
+
+  function applyMemoryBlocks(blocks) {
+    var n = 0;
+    blocks.forEach(function (b) {
+      if (!b.path) return;
+      if (/^(SOUL|MEMORY)\.md$/i.test(b.path)) return;   // 人格文件不允许被自动改
+      if (b.del) {
+        MEM.remove(b.path);
+        MEM.addLog('work', '删除记忆页 ' + b.path);
+        n++;
+        return;
+      }
+      var p = MEM.parseFile(b.body, b.path);
+      MEM.upsert(p);
+      MEM.addLog('fact', '更新记忆页 ' + b.path);
+      n++;
+    });
+    if (n) {
+      refreshHeader();
+      renderMemory();
+    }
+    return n;
+  }
+
   /* 从回复里捞「装技能」指令块 */
   function extractSkillDirective(text) {
     var m = text.match(/```xi-skill\s*\n([\s\S]*?)```/);
@@ -619,6 +660,32 @@
       BAL = null;
     }
     renderBalance();
+  }
+
+  var lastBalAt = 0;
+  var balTimer = null;
+
+  /* 余额：immediate=true 立刻打（对话结束、打开余额详情）；否则 20 秒内合并成一次 */
+  function scheduleBalance(immediate) {
+    if (immediate) {
+      lastBalAt = Date.now();
+      if (balTimer) { clearTimeout(balTimer); balTimer = null; }
+      refreshBalance();
+      return;
+    }
+    var now = Date.now();
+    var wait = 20000 - (now - lastBalAt);
+    if (wait > 0) {
+      if (balTimer) clearTimeout(balTimer);
+      balTimer = setTimeout(function () {
+        balTimer = null;
+        lastBalAt = Date.now();
+        refreshBalance();
+      }, wait);
+      return;
+    }
+    lastBalAt = now;
+    refreshBalance();
   }
 
   function renderBalance() {
@@ -1088,10 +1155,21 @@
   /* 语音输入：AI（录音转写）或系统识别 */
   var voiceSeq = 0;
   var voiceRec = false;
+  var voiceWarned = false;
 
   function startVoice() {
     if (!window.XiNative) { toast('手机端才有语音输入', 2000); return; }
-    if (S.voiceMode !== 'system' && window.XiNative.startRecordBridge) { aiVoice(); return; }
+    // DeepSeek 没有 /audio/transcriptions，AI 转写必然 404，直接用系统识别
+    var host = String(S.baseUrl || '').toLowerCase();
+    var noAsr = /deepseek\.com/.test(host);
+    if (S.voiceMode !== 'system' && window.XiNative.startRecordBridge && !noAsr) {
+      aiVoice();
+      return;
+    }
+    if (S.voiceMode !== 'system' && noAsr && !voiceWarned) {
+      voiceWarned = true;
+      toast('DeepSeek 没有转写接口，用系统识别', 2800);
+    }
     systemVoice();
   }
 
@@ -1129,7 +1207,13 @@
       };
       window.__xiTranscribeError = function (t, m) {
         if (t !== tid) return;
-        toast('转写失败：' + String(m).slice(0, 90), 3000);
+        var s = String(m || '');
+        if (/404|not found|not_found|unsupported/i.test(s)) {
+          toast('这个接口不支持转写，切回系统识别', 2800);
+          systemVoice();
+          return;
+        }
+        toast('转写失败：' + s.slice(0, 90), 3000);
       };
       window.XiNative.transcribe(tid, url, S.apiKey || '', S.asrModel || 'whisper-1', b64, 'm4a');
     };
@@ -1538,13 +1622,22 @@
         if (dropped) { resolve(); return; }
 
         var skillDir = null;
+        var memBlocks = [];
         if (msg.content) {
           var ex = extractSkillDirective(msg.content);
           if (ex.dir) {
             skillDir = ex.dir;
             msg.content = ex.text;
           }
+          memBlocks = extractMemoryDirectives(msg.content);
+          if (memBlocks.length) {
+            memBlocks.forEach(function (b) {
+              msg.content = msg.content.replace(b.raw, '');
+            });
+            msg.content = msg.content.trim();
+          }
         }
+        var wroteMem = memBlocks.length ? applyMemoryBlocks(memBlocks) : 0;
         var uu = mapUsage(lastUsage);
         if (uu) msg.usage = uu;
         if (reason) msg.reasoning = reason;
@@ -1572,6 +1665,8 @@
         if (skillDir) {
           setTimeout(function () { installSkill(skillDir.repo, skillDir.triggers || null); }, 900);
         }
+        if (wroteMem) toast('已写进记忆：' + wroteMem + ' 页', 2400);
+        scheduleBalance(true);
         resolve();
       }
 
@@ -2261,7 +2356,16 @@
     renderSessions();
     refreshHeader();
     renderBalance();
-    refreshBalance();
+    scheduleBalance(true);
+
+    // 回前台 / 每分钟，都顺手刷一次余额
+    window.__xiResume = function () { scheduleBalance(); };
+    setInterval(function () {
+      if (!document.hidden) scheduleBalance();
+    }, 60000);
+    document.addEventListener('visibilitychange', function () {
+      if (!document.hidden) scheduleBalance();
+    });
 
     var env = '';
     try {

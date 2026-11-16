@@ -57,7 +57,8 @@ console.log('\n[3] 系统提示');
 const prompt = vm.runInContext('window.MEM.prompt({recalled: []})', ctx);
 ok('提示里有 SOUL', prompt.includes('SOUL.md'));
 ok('提示里有记忆索引', prompt.includes('记忆索引'));
-ok('提示里有工作方式', prompt.includes('只有聊天'));
+ok('提示里有工作方式', prompt.includes('没有代码执行'));
+ok('提示里有写记忆通道', prompt.includes('xi-memory'));
 ok('提示长度合理', prompt.length > 800 && prompt.length < 20000, prompt.length);
 
 console.log('\n[4] 召回');

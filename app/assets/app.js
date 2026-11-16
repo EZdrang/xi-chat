@@ -47,6 +47,7 @@
   var aborted = false;
   var currentReq = null;
   var streamCtx = null;
+  var pendingFind = '';
   var renderLimits = {};   // 会话 id → 渲染多少条（长会话懒加载）
   var pendingReq = {};    // id -> handlers
   var reqSeq = 0;
@@ -132,11 +133,22 @@
 
   function nearBottom() {
     var l = $('list');
-    return l.scrollHeight - l.scrollTop - l.clientHeight < 120;
+    return l.scrollHeight - l.scrollTop - l.clientHeight < 80;
   }
+
+  var stickBottom = true;
+
+  /* 贴底跟读：你没往上拨就一路跟着最新回复；你手一滑就停在原处，不抢你屏幕 */
   function scrollBottom(force) {
     var l = $('list');
-    if (force || nearBottom()) l.scrollTop = l.scrollHeight;
+    if (force) { stickBottom = true; l.scrollTop = l.scrollHeight; return; }
+    if (stickBottom) l.scrollTop = l.scrollHeight;
+  }
+
+  function bindScrollStick() {
+    $('list').addEventListener('scroll', function () {
+      stickBottom = nearBottom();
+    }, { passive: true });
   }
 
   /* ════════════════════ 网络层 ════════════════════ */
@@ -611,6 +623,34 @@
     return n;
   }
 
+  /* 从回复里捞「帮我搜一下」指令块 */
+  function extractFindDirective(text) {
+    var m = text.match(/```xi-find\s*\n([\s\S]*?)```/);
+    if (!m) return { text: text, kw: '' };
+    return { text: text.replace(m[0], '').trim(), kw: (m[1] || '').trim().slice(0, 80) };
+  }
+
+  /* 搜 GitHub 仓库，把结果当成一条隐藏的系统消息喂回去，让她接着决定 */
+  async function continueWithSearch(sess, kw) {
+    var j = JSON.parse(await ghGet('https://api.github.com/search/repositories?q=' +
+      encodeURIComponent(kw + ' skill') + '&sort=stars&per_page=6'));
+    var items = (j.items || []).map(function (it) {
+      return '- ' + it.full_name + ' ★' + it.stargazers_count + '：' + String(it.description || '').slice(0, 70);
+    });
+    if (!items.length) {
+      sess.messages.push({ role: 'system', hidden: true, content: '【GitHub 搜索「' + kw + '」没有结果】换个说法再搜，或者直接向指挥官要链接。' });
+    } else {
+      sess.messages.push({
+        role: 'system', hidden: true,
+        content: '【GitHub 搜索「' + kw + '」的结果】\n' + items.join('\n') +
+          '\n\n要装哪个就输出 xi-skill 块（repo: owner/repo），别把整段结果念给指挥官。',
+      });
+      toast('搜到 ' + items.length + ' 个仓库', 2000);
+    }
+    await saveCur();
+    await runChat(sess);
+  }
+
   /* 从回复里捞「装技能」指令块 */
   function extractSkillDirective(text) {
     var m = text.match(/```xi-skill\s*\n([\s\S]*?)```/);
@@ -853,6 +893,7 @@
 
     for (var i = start; i < total; i++) {
       var m = cur.messages[i];
+      if (m.hidden) continue;
       var prev = i > 0 ? cur.messages[i - 1].ts : 0;
       if (needTimeSep(prev, m.ts)) box.appendChild(timeSepNode(m.ts || Date.now()));
       box.appendChild(msgNode(m, i));
@@ -1521,6 +1562,10 @@
       out.push({ role: 'system', content: '【早前对话的压缩摘要】\n' + sess.summary });
     }
     sess.messages.forEach(function (m) {
+      if (m.hidden && m.role === 'system') {
+        out.push({ role: 'system', content: m.content });
+        return;
+      }
       if (m.role !== 'user' && m.role !== 'assistant') return;
       if (m.role === 'user' && m.images && m.images.length) {
         var parts = [];
@@ -1581,6 +1626,13 @@
     try {
       if (S.compress) await maybeCompress();
       await runChat(sess);
+      var hops = 0;
+      while (pendingFind && hops < 2) {
+        var kw = pendingFind;
+        pendingFind = '';
+        hops++;
+        await continueWithSearch(sess, kw);
+      }
     } finally {
       busy = false;
       setSendState('send');
@@ -1666,7 +1718,13 @@
 
         var skillDir = null;
         var memBlocks = [];
+        pendingFind = '';
         if (msg.content) {
+          var fd = extractFindDirective(msg.content);
+          if (fd.kw) {
+            msg.content = fd.text;
+            pendingFind = fd.kw;
+          }
           var ex = extractSkillDirective(msg.content);
           if (ex.dir) {
             skillDir = ex.dir;
@@ -2217,6 +2275,7 @@
   }
 
   function bindUI() {
+    bindScrollStick();
     $('btnMenu').addEventListener('click', openDrawer);
     $('scrim').addEventListener('click', closeDrawer);
     $('btnNew').addEventListener('click', function () { closeDrawer(); newSession(); });

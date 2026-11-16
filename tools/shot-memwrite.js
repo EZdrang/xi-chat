@@ -72,7 +72,7 @@ const BASE = 'http://127.0.0.1:8787/index.html';
 
     const before = window.__xi.MEM.stats().pages;
 
-    document.getElementById('input').value = '把他们写进记忆';
+    document.getElementById('input').value = '以后叫我元首吧';
     await window.__xi.send();
     await wait(600);
 

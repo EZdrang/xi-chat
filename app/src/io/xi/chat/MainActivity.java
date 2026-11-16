@@ -79,6 +79,8 @@ public class MainActivity extends Activity {
     private long stepBase = -1;
     private long stepNow = -1;
     private String stepDay = "";
+    private Db dbHelper;
+    private android.database.sqlite.SQLiteDatabase dbCache;
     private final Handler ui = new Handler(Looper.getMainLooper());
 
     @Override
@@ -521,6 +523,37 @@ public class MainActivity extends Activity {
         }
     }
 
+    /** 记忆库的 SQLite：页面 + 时间线 + 全文索引 */
+    private android.database.sqlite.SQLiteDatabase db() {
+        if (dbCache != null && dbCache.isOpen()) return dbCache;
+        if (dbHelper == null) dbHelper = new Db(this);
+        dbCache = dbHelper.getWritableDatabase();
+        return dbCache;
+    }
+
+    private static String[] strArgs(org.json.JSONArray arr) {
+        String[] out = new String[arr == null ? 0 : arr.length()];
+        for (int i = 0; i < out.length; i++) out[i] = arr.optString(i, "");
+        return out;
+    }
+
+    private static class Db extends android.database.sqlite.SQLiteOpenHelper {
+        Db(Context c) { super(c, "xi.db", null, 1); }
+
+        @Override
+        public void onCreate(android.database.sqlite.SQLiteDatabase d) {
+            d.execSQL("CREATE TABLE pages(path TEXT PRIMARY KEY, title TEXT, type TEXT, " +
+                    "salience INTEGER, summary TEXT, body TEXT, triggers TEXT, updated_at INTEGER)");
+            d.execSQL("CREATE TABLE logs(ts TEXT, kind TEXT, title TEXT)");
+            d.execSQL("CREATE TABLE sessions(id TEXT PRIMARY KEY, title TEXT, created_at INTEGER, " +
+                    "updated_at INTEGER, count INTEGER, data TEXT)");
+            d.execSQL("CREATE VIRTUAL TABLE pages_fts USING fts4(path, title, body)");
+        }
+
+        @Override
+        public void onUpgrade(android.database.sqlite.SQLiteDatabase d, int o, int n) { }
+    }
+
     void pickFile(String id, String mime) {
         pickId = id;
         boolean img = mime != null && mime.startsWith("image/");
@@ -907,6 +940,56 @@ public class MainActivity extends Activity {
                             + JSONObject.quote(String.valueOf(e.getMessage())) + ");");
                 }
             }).start();
+        }
+
+        @JavascriptInterface
+        public String dbAll(String sql, String argsJson) {
+            try {
+                org.json.JSONArray args = new org.json.JSONArray(argsJson == null ? "[]" : argsJson);
+                android.database.Cursor c = db().rawQuery(sql, strArgs(args));
+                org.json.JSONArray rows = new org.json.JSONArray();
+                while (c.moveToNext()) {
+                    org.json.JSONObject o = new org.json.JSONObject();
+                    for (int i = 0; i < c.getColumnCount(); i++) {
+                        String col = c.getColumnName(i);
+                        o.put(col, c.isNull(i) ? "" : c.getString(i));
+                    }
+                    rows.put(o);
+                }
+                c.close();
+                return rows.toString();
+            } catch (Exception e) {
+                return "[]";
+            }
+        }
+
+        @JavascriptInterface
+        public boolean dbRun(String sql, String argsJson) {
+            try {
+                org.json.JSONArray args = new org.json.JSONArray(argsJson == null ? "[]" : argsJson);
+                db().execSQL(sql, strArgs(args));
+                return true;
+            } catch (Exception e) {
+                return false;
+            }
+        }
+
+        @JavascriptInterface
+        public String dbStats() {
+            try {
+                org.json.JSONObject o = new org.json.JSONObject();
+                android.database.Cursor c = db().rawQuery(
+                        "SELECT (SELECT COUNT(*) FROM pages), (SELECT COUNT(*) FROM logs)", null);
+                if (c.moveToNext()) {
+                    o.put("pages", c.getInt(0));
+                    o.put("logs", c.getInt(1));
+                }
+                c.close();
+                o.put("size", getDatabasePath("xi.db").length());
+                return o.toString();
+            } catch (Exception e) {
+                return "{}";
+            }
         }
 
         @JavascriptInterface

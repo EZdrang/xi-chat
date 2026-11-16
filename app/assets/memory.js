@@ -17,6 +17,27 @@
   }
 
   /* ---------- 持久化 ---------- */
+  /* ---------- 持久化：手机端走 SQLite，浏览器/测试走 localStorage ---------- */
+  var dbOn = false;
+
+  function sqlAll(sql, args) {
+    try {
+      var raw = window.XiNative.dbAll(sql, JSON.stringify(args || []));
+      var rows = JSON.parse(raw);
+      return Array.isArray(rows) ? rows : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function sqlRun(sql, args) {
+    try {
+      return window.XiNative.dbRun(sql, JSON.stringify(args || [])) !== false;
+    } catch (e) {
+      return false;
+    }
+  }
+
   function load() {
     try {
       var raw = localStorage.getItem(KEY);
@@ -24,6 +45,39 @@
     } catch (e) { /* 损坏则重建 */ }
     if (!state || !Array.isArray(state.pages)) state = { pages: [], log: [] };
     if (!Array.isArray(state.log)) state.log = [];
+  }
+
+  function loadFromDb() {
+    var rows = sqlAll('SELECT path,title,type,salience,summary,body,triggers FROM pages ORDER BY path', []);
+    if (!rows.length) return false;
+    state.pages = rows.map(function (r) {
+      var tr = [];
+      try { tr = JSON.parse(r.triggers || '[]'); } catch (e) { tr = []; }
+      return {
+        path: r.path, title: r.title || '', type: r.type || 'fact',
+        salience: Number(r.salience) || 2, summary: r.summary || '',
+        body: r.body || '', triggers: Array.isArray(tr) ? tr : [],
+      };
+    });
+    state.log = sqlAll('SELECT ts,kind,title FROM logs ORDER BY rowid DESC LIMIT 2000', [])
+      .map(function (r) { return { ts: r.ts, kind: r.kind, title: r.title }; })
+      .reverse();
+    return true;
+  }
+
+  function migrateToDb() {
+    var n = 0;
+    state.pages.forEach(function (p) {
+      sqlRun('INSERT OR REPLACE INTO pages(path,title,type,salience,summary,body,triggers,updated_at) VALUES(?,?,?,?,?,?,?,?)',
+        [p.path, p.title || '', p.type || 'fact', Number(p.salience) || 2,
+          p.summary || '', p.body || '', JSON.stringify(p.triggers || []), Date.now()]);
+      n++;
+    });
+    state.log.slice(-300).forEach(function (l) {
+      sqlRun('INSERT INTO logs(ts,kind,title) VALUES(?,?,?)', [l.ts || '', l.kind || 'work', l.title || '']);
+    });
+    if (n) console.log('[memory] 迁移 ' + n + ' 页到 SQLite');
+    return n;
   }
 
   function save() {
@@ -34,6 +88,7 @@
       return false;
     }
   }
+
 
   function seedIfEmpty() {
     load();
@@ -100,6 +155,7 @@
       cur.updated = nowStamp();
       if (Array.isArray(p.tags)) cur.tags = p.tags;
       save();
+      if (dbOn) persistPage(cur);
       return cur;
     }
     var np = {
@@ -117,21 +173,55 @@
     };
     state.pages.push(np);
     save();
+    if (dbOn) persistPage(np);
     return np;
+  }
+
+  function persistPage(p) {
+    sqlRun('INSERT OR REPLACE INTO pages(path,title,type,salience,summary,body,triggers,updated_at) VALUES(?,?,?,?,?,?,?,?)',
+      [p.path, p.title || '', p.type || 'fact', Number(p.salience) || 2,
+        p.summary || '', p.body || '', JSON.stringify(p.triggers || []), Date.now()]);
+    sqlRun('DELETE FROM pages_fts WHERE path=?', [p.path]);
+    sqlRun('INSERT INTO pages_fts(path,title,body) VALUES(?,?,?)',
+      [p.path, p.title || '', (p.summary || '') + '\n' + (p.body || '')]);
   }
 
   function remove(path) {
     var n = state.pages.length;
     state.pages = state.pages.filter(function (p) { return p.path !== path; });
     save();
+    if (dbOn) {
+      sqlRun('DELETE FROM pages WHERE path=?', [path]);
+      sqlRun('DELETE FROM pages_fts WHERE path=?', [path]);
+    }
     return state.pages.length !== n;
   }
 
   function addLog(kind, title) {
     if (!title) return;
-    state.log.push({ ts: nowStamp(), kind: kind || 'work', title: String(title).slice(0, 200) });
+    var item = { ts: nowStamp(), kind: kind || 'work', title: String(title).slice(0, 200) };
+    state.log.push(item);
     if (state.log.length > 2000) state.log = state.log.slice(-2000);
     save();
+    if (dbOn) sqlRun('INSERT INTO logs(ts,kind,title) VALUES(?,?,?)', [item.ts, item.kind, item.title]);
+  }
+
+  /* 全文检索：走 SQLite 的 FTS，比在 JS 里遍历快得多 */
+  function search(q, limit) {
+    if (!q) return [];
+    var n = limit || 20;
+    if (dbOn) {
+      var rows = sqlAll(
+        'SELECT path,title,snippet(pages_fts) AS snip FROM pages_fts WHERE pages_fts MATCH ? LIMIT ?',
+        [String(q).replace(/"/g, '""') + '*', n]);
+      return rows.map(function (r) { return { path: r.path, title: r.title, snippet: r.snip }; });
+    }
+    var low = String(q).toLowerCase();
+    return state.pages.filter(function (p) {
+      return (String(p.body || '') + String(p.title || '')).toLowerCase().indexOf(low) >= 0;
+    }).slice(0, n).map(function (p) {
+      return { path: p.path, title: p.title, snippet: String(p.body || '').slice(0, 80) };
+    });
   }
 
   /* ---------- 派生文件 ---------- */
@@ -777,7 +867,18 @@
   }
 
   window.MEM = {
-    init: function () { return seedIfEmpty() || (load(), false); },
+    init: function () {
+      // 手机端优先 SQLite：空库就把 localStorage 里的旧记忆迁进去
+      if (window.XiNative && window.XiNative.dbAll) {
+        dbOn = true;
+        load();
+        if (loadFromDb()) return false;
+        var seeded = seedIfEmpty();
+        migrateToDb();
+        return seeded;
+      }
+      return seedIfEmpty() || (load(), false);
+    },
     load: load,
     save: save,
     list: list,
@@ -798,6 +899,7 @@
     hashOf: hashOf,
     recall: recall,
     matchSkills: matchSkills,
+    search: search,
     prompt: prompt,
     stats: stats,
     today: today,

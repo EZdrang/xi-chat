@@ -66,7 +66,7 @@ const BASE = 'http://127.0.0.1:8787/index.html';
     };
   });
 
-  const ok = r.model === 'deepseek-v4-pro' &&
+  const ok = r.model === 'deepseek-flash' &&
     r.parts.includes('image_url') && r.hasVisionField === false && errs.length === 0;
 
   console.log((ok ? '✓' : '✗') + ' 主模型带图 ' + JSON.stringify(r));

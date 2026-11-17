@@ -2281,10 +2281,13 @@
       }
 
       var nativeSearch = S.searchMode === 'native';
+      // DeepSeek 只有 flash 支持看图；带图时自动切过去，纯文字仍用主模型
+      var dsHost = /deepseek\.com/.test(String(S.baseUrl || '').toLowerCase());
+      var pickModel = nativeSearch ? (S.searchModel || 'deepseek-flash') : S.model;
+      if (dsHost && hasImages(sess)) pickModel = 'deepseek-flash';
+
       var body = {
-        model: nativeSearch
-          ? (S.searchModel || 'deepseek-flash')
-          : S.model,
+        model: pickModel,
         messages: buildMessages(sess),
         stream: !!S.stream,
       };

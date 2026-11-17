@@ -1281,6 +1281,34 @@
     }
   }
 
+  /* 日记只用一页：按日期分节，新的补在最前面，同一天覆盖 */
+  function writeDiary(mem, stamp, text) {
+    var path = 'diary/日记.md';
+    var page = mem.get(path);
+    var body = page ? String(page.body || '') : '';
+    var entry = '## ' + stamp + '\n\n' + String(text || '').trim();
+
+    var re = new RegExp('## ' + stamp.replace(/[-]/g, '\\-') + '\\n[\\s\\S]*?(?=\\n## |$)');
+    if (re.test(body)) {
+      body = body.replace(re, entry);
+    } else {
+      body = body ? (entry + '\n\n' + body.trim()) : entry;
+    }
+    // 只留最近 60 天，别无限长
+    var parts = body.split(/\n## /).filter(Boolean);
+    if (parts.length > 60) parts = parts.slice(0, 60);
+    body = parts.map(function (s, i) { return (i === 0 ? (s.indexOf('## ') === 0 ? s : '## ' + s) : '## ' + s); }).join('\n');
+
+    mem.upsert({
+      path: path,
+      title: '日记',
+      type: 'fact',
+      salience: 3,
+      summary: '按天记的一本，最近：' + String(text || '').replace(/\s+/g, ' ').slice(0, 40),
+      body: body.trim() + '\n',
+    });
+  }
+
   /* 夜间整理（模型版）：她出合并/分歧/日记的方案，这里只负责执行 */
   async function runNightlyAI() {
     if (!S.apiKey || !window.XiNightly) return false;
@@ -1337,16 +1365,7 @@
       did.archive++;
     });
 
-    if (plan.diary) {
-      mem.upsert({
-        path: 'diary/' + stamp + '.md',
-        title: stamp + ' 日记',
-        type: 'fact',
-        salience: 3,
-        summary: String(plan.diary).replace(/\s+/g, ' ').slice(0, 60),
-        body: '## ' + stamp + '\n\n' + String(plan.diary).trim(),
-      });
-    }
+    if (plan.diary) writeDiary(mem, stamp, plan.diary);
 
     mem.addLog('work', '夜里整理：合并 ' + did.merge + ' 页、标记 ' + did.conflict +
       ' 处分歧、归档 ' + did.archive + ' 页' + (plan.note ? '（' + String(plan.note).slice(0, 60) + '）' : ''));

@@ -75,7 +75,7 @@ const BASE = 'http://127.0.0.1:8787/index.html';
     const skill = (window.__xi.MEM.get('skills/情绪陪伴.md') || {}).body || '';
     const soul = (window.__xi.MEM.get('SOUL.md') || {}).body || '';
     const pref = (window.__xi.MEM.get('user/profile.md') || {}).body || '';
-    const diary = window.__xi.MEM.get('diary/' + window.XiNightly.todayStamp() + '.md');
+    const diary = window.__xi.MEM.get('diary/日记.md');
     const hist = JSON.parse(localStorage.getItem('xi.v1.pagehist') || '{}');
 
     return {

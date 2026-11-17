@@ -153,21 +153,28 @@
       if (nb !== body) MEM.upsert({ path: p.path, body: nb });
     });
 
-    // 2) 写一行日记
+    // 2) 写日记（一本，按日期分节）
     var sn = snapshot();
+    var line = [
+      '- 记忆页 ' + pages.length + ' 页，去掉重复行 ' + cleaned + ' 处',
+      '- 收尾时状态：精力 ' + sn.energy + '，心情 ' + sn.mood + '，温度 ' + sn.warmth + '，闷 ' + sn.boredom,
+    ].join('\n');
+    var dpath = 'diary/日记.md';
+    var dpage = MEM.get(dpath);
+    var dbody = dpage ? String(dpage.body || '') : '';
+    var dentry = '## ' + stamp + '\n\n' + line;
+    if (dbody.indexOf('## ' + stamp) >= 0) {
+      dbody = dbody.replace(new RegExp('## ' + stamp.replace(/[-]/g, '\\-') + '\\n[\\s\\S]*?(?=\\n## |$)'), dentry);
+    } else {
+      dbody = dbody ? (dentry + '\n\n' + dbody.trim()) : dentry;
+    }
     MEM.upsert({
-      path: 'diary/' + stamp + '.md',
-      title: stamp + ' 日记',
+      path: dpath,
+      title: '日记',
       type: 'fact',
       salience: 3,
-      summary: '精力 ' + sn.energy + ' / 心情 ' + sn.mood + ' / 温度 ' + sn.warmth,
-      body: [
-        '## 今天',
-        '',
-        '- 记忆页 ' + pages.length + ' 页，去掉重复行 ' + cleaned + ' 处',
-        '- 收尾时状态：精力 ' + sn.energy + '，心情 ' + sn.mood + '，温度 ' + sn.warmth + '，闷 ' + sn.boredom,
-        todayLogs ? '- 时间线今天累计 ' + todayLogs + ' 条' : '',
-      ].filter(Boolean).join('\n'),
+      summary: '按天记的一本，最近：精力 ' + sn.energy + ' / 心情 ' + sn.mood,
+      body: dbody.trim() + '\n',
     });
 
     MEM.addLog('work', '夜间整理：' + pages.length + ' 页，去重 ' + cleaned + ' 处，写了日记');

@@ -136,24 +136,41 @@ function nightly() {
   }
 
   const today = new Date().toISOString().slice(0, 10);
-  const diary = path.join(MEM, 'diary', today + '.md');
+  const diary = path.join(MEM, 'diary', '日记.md');
   fs.mkdirSync(path.dirname(diary), { recursive: true });
-  fs.writeFileSync(diary, [
-    '---',
-    'title: ' + today + ' 日记',
-    'date: ' + today,
-    'type: fact',
-    'salience: 3',
-    'summary: 整理 ' + pages.length + ' 页，去重 ' + cleaned + ' 处；精力 ' + Math.round(st.energy) + '。',
-    'tags: [diary]',
-    '---',
-    '',
-    '## 今天',
+
+  const entry = [
+    '## ' + today,
     '',
     '- 记忆页 ' + pages.length + ' 页，去掉重复行 ' + cleaned + ' 处',
     '- 收尾状态：精力 ' + Math.round(st.energy) + '，心情 ' + Math.round(st.mood) + '，温度 ' + Math.round(st.warmth),
+  ].join('\n');
+
+  let body = '';
+  try { body = fs.readFileSync(diary, 'utf8'); } catch (e) { body = ''; }
+  const head = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/;
+  const fm = body.match(head);
+  const meta = fm ? fm[0] : '';
+  let rest = fm ? body.slice(fm[0].length) : body;
+
+  // 同一天就覆盖，不同天补在最前面
+  const dup = new RegExp('## ' + today.replace(/-/g, '\\-') + '\\n[\\s\\S]*?(?=\\n## |$)');
+  if (dup.test(rest)) rest = rest.replace(dup, entry);
+  else rest = rest.trim() ? entry + '\n\n' + rest.trim() : entry;
+
+  const frontmatter = meta || [
+    '---',
+    'title: 日记',
+    'date: ' + today,
+    'type: fact',
+    'salience: 3',
+    'summary: 按天记的一本日记。',
+    'tags: [diary]',
+    '---',
     '',
-  ].join('\n'), 'utf8');
+  ].join('\n');
+
+  fs.writeFileSync(diary, frontmatter + '\n' + rest.trim() + '\n', 'utf8');
 
   const log = path.join(MEM, 'log.md');
   fs.appendFileSync(log, '\n## [' + today + '] work | 夜间整理\n整理 ' + pages.length + ' 页，去重 ' + cleaned +

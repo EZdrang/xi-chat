@@ -1635,21 +1635,15 @@
   var voiceSeq = 0;
   var voiceRec = false;
   var voiceWarned = false;
+  var voiceCapTimer = null;
 
   function startVoice() {
     if (!window.XiNative) { toast('手机端才有语音输入', 2000); return; }
-    // DeepSeek 没有 /audio/transcriptions，AI 转写必然 404，直接用系统识别
-    var host = String(S.baseUrl || '').toLowerCase();
-    var noAsr = /deepseek\.com/.test(host);
-    if (S.voiceMode !== 'system' && window.XiNative.startRecordBridge && !noAsr) {
-      aiVoice();
+    if (S.voiceMode === 'system' || !window.XiNative.startRecordBridge) {
+      systemVoice();
       return;
     }
-    if (S.voiceMode !== 'system' && noAsr && !voiceWarned) {
-      voiceWarned = true;
-      toast('DeepSeek 没有转写接口，用系统识别', 2800);
-    }
-    systemVoice();
+    aiVoice();
   }
 
   function aiVoice() {
@@ -1668,11 +1662,26 @@
       voiceRec = true;
       btn.classList.add('recording');
       toast('在听…再点一下结束', 1800);
+      clearTimeout(voiceCapTimer);
+      // 接口限 120 秒，快到时自动收尾
+      voiceCapTimer = setTimeout(function () {
+        if (!voiceRec) return;
+        voiceRec = false;
+        btn.classList.remove('recording');
+        btn.classList.add('busy');
+        toast('快两分钟了，先拿这段去转写', 2400);
+        window.XiNative.stopRecordBridge();
+      }, 110000);
     };
     window.__xiRecorded = function (pid, b64) {
       if (pid !== id) return;
       btn.classList.remove('busy');
-      var url = (S.baseUrl || '').replace(/\/+$/, '') + '/audio/transcriptions';
+      var base = (S.baseUrl || '').replace(/\/+$/, '');
+      // DeepSeek 的 ASR 在 /v1/tools/asr；其他 OpenAI 兼容端点走 /audio/transcriptions
+      var isDs = /deepseek\.com/.test(base.toLowerCase());
+      var url = isDs
+        ? base.replace(/\/v1$/, '') + '/v1/tools/asr'
+        : base + '/audio/transcriptions';
       var tid = 't' + Date.now().toString(36);
       window.__xiTranscribed = function (t, text) {
         if (t !== tid) return;
@@ -1694,7 +1703,7 @@
         }
         toast('转写失败：' + s.slice(0, 90), 3000);
       };
-      window.XiNative.transcribe(tid, url, S.apiKey || '', S.asrModel || 'whisper-1', b64, 'm4a');
+      window.XiNative.transcribe(tid, url, S.apiKey || '', S.asrModel || 'whisper-1', b64, 'wav');
     };
     window.__xiRecError = function (pid, m) {
       if (pid !== id) return;

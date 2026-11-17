@@ -70,7 +70,9 @@ public class MainActivity extends Activity {
     private Bridge bridge;
     private String pickId;
     private String voiceId;
-    private MediaRecorder recorder;
+    private android.media.AudioRecord audioRec;
+    private Thread recThread;
+    private volatile boolean recording;
     private File recFile;
     private String recId;
     private String pendingRecId;
@@ -229,24 +231,73 @@ public class MainActivity extends Activity {
         try {
             File dir = new File(getCacheDir(), "voice");
             if (!dir.exists()) dir.mkdirs();
-            recFile = new File(dir, "v" + System.currentTimeMillis() + ".m4a");
-            recorder = Build.VERSION.SDK_INT >= 31 ? new MediaRecorder(this) : new MediaRecorder();
-            recorder.setAudioSource(MediaRecorder.AudioSource.MIC);
-            recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
-            recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
-            recorder.setAudioSamplingRate(16000);
-            recorder.setAudioChannels(1);
-            recorder.setAudioEncodingBitRate(32000);
-            recorder.setOutputFile(recFile.getAbsolutePath());
-            recorder.prepare();
-            recorder.start();
+            final File out = new File(dir, "v" + System.currentTimeMillis() + ".wav");
+            recFile = out;
+
+            final int rate = 16000;
+            int minBuf = android.media.AudioRecord.getMinBufferSize(rate,
+                    android.media.AudioFormat.CHANNEL_IN_MONO,
+                    android.media.AudioFormat.ENCODING_PCM_16BIT);
+            audioRec = new android.media.AudioRecord(android.media.MediaRecorder.AudioSource.MIC,
+                    rate, android.media.AudioFormat.CHANNEL_IN_MONO,
+                    android.media.AudioFormat.ENCODING_PCM_16BIT, Math.max(minBuf, 8192));
+            audioRec.startRecording();
+            recording = true;
             recId = id;
+
+            recThread = new Thread(() -> {
+                byte[] buf = new byte[4096];
+                ByteArrayOutputStream bos = new ByteArrayOutputStream();
+                while (recording) {
+                    int n = audioRec == null ? -1 : audioRec.read(buf, 0, buf.length);
+                    if (n > 0) bos.write(buf, 0, n);
+                }
+                try {
+                    writeWav(out, bos.toByteArray(), rate, 1, 16);
+                } catch (Exception ignored) {
+                }
+            });
+            recThread.start();
             emit("window.__xiRecStarted(" + JSONObject.quote(id) + ");");
         } catch (Exception e) {
             stopRecordInternal(false);
             emit("window.__xiRecError(" + JSONObject.quote(id) + ","
                     + JSONObject.quote(String.valueOf(e.getMessage())) + ");");
         }
+    }
+
+    /** 写一个标准的 16 位 PCM WAV，DeepSeek 的 ASR 只吃这个格式 */
+    private static void writeWav(File f, byte[] pcm, int rate, int channels, int bits) throws Exception {
+        int dataLen = pcm.length;
+        int byteRate = rate * channels * bits / 8;
+        int blockAlign = channels * bits / 8;
+        ByteArrayOutputStream h = new ByteArrayOutputStream();
+        h.write("RIFF".getBytes("US-ASCII"));
+        h.write(intLE(36 + dataLen));
+        h.write("WAVE".getBytes("US-ASCII"));
+        h.write("fmt ".getBytes("US-ASCII"));
+        h.write(intLE(16));
+        h.write(shortLE((short) 1));
+        h.write(shortLE((short) channels));
+        h.write(intLE(rate));
+        h.write(intLE(byteRate));
+        h.write(shortLE((short) blockAlign));
+        h.write(shortLE((short) bits));
+        h.write("data".getBytes("US-ASCII"));
+        h.write(intLE(dataLen));
+        FileOutputStream fo = new FileOutputStream(f);
+        fo.write(h.toByteArray());
+        fo.write(pcm);
+        fo.close();
+    }
+
+    private static byte[] intLE(int v) {
+        return new byte[]{(byte) (v & 0xff), (byte) ((v >> 8) & 0xff),
+                (byte) ((v >> 16) & 0xff), (byte) ((v >> 24) & 0xff)};
+    }
+
+    private static byte[] shortLE(short v) {
+        return new byte[]{(byte) (v & 0xff), (byte) ((v >> 8) & 0xff)};
     }
 
     void stopRecord() {
@@ -284,21 +335,29 @@ public class MainActivity extends Activity {
     }
 
     private boolean stopRecordInternal(boolean normal) {
+        recording = false;
         boolean ok = false;
-        if (recorder != null) {
+        if (audioRec != null) {
             try {
-                recorder.stop();
+                audioRec.stop();
                 ok = true;
             } catch (Exception ignored) {
             }
             try {
-                recorder.release();
+                audioRec.release();
             } catch (Exception ignored) {
             }
-            recorder = null;
+            audioRec = null;
         }
+        if (recThread != null) {
+            try {
+                recThread.join(1500);
+            } catch (Exception ignored) {
+            }
+            recThread = null;
+        }
+        if (recId != null && recFile != null && normal) ok = true;
         recId = null;
-        recFile = null;
         return ok;
     }
 
@@ -1083,12 +1142,14 @@ public class MainActivity extends Activity {
             try {
                 byte[] audio = Base64.decode(b64, Base64.NO_WRAP);
                 String boundary = "xi" + System.currentTimeMillis();
+                boolean deepseek = url != null && url.contains("/tools/asr");
                 ByteArrayOutputStream bo = new ByteArrayOutputStream();
                 String head = "--" + boundary + "\r\n"
-                        + "Content-Disposition: form-data; name=\"model\"\r\n\r\n" + model + "\r\n"
-                        + "--" + boundary + "\r\n"
+                        + (deepseek ? "" : "Content-Disposition: form-data; name=\"model\"\r\n\r\n" + model + "\r\n"
+                        + "--" + boundary + "\r\n")
                         + "Content-Disposition: form-data; name=\"file\"; filename=\"v." + ext + "\"\r\n"
-                        + "Content-Type: audio/" + ("m4a".equals(ext) ? "mp4" : ext) + "\r\n\r\n";
+                        + "Content-Type: " + ("wav".equals(ext) ? "audio/wav"
+                        : ("m4a".equals(ext) ? "audio/mp4" : "audio/" + ext)) + "\r\n\r\n";
                 bo.write(head.getBytes(StandardCharsets.UTF_8));
                 bo.write(audio);
                 bo.write(("\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));

@@ -1018,7 +1018,7 @@
       (isMe ? '' : '<div class="ava"><img src="avatar.png" alt="汐"></div>') +
       '<div class="body">' +
         '<div class="bubble">' + think + media +
-          '<div class="md">' + md + '</div>' +
+          '<div class="md">' + renderImgSlots(renderStickers(md)) + '</div>' +
         '</div>' +
         '<div class="meta">' +
           '<span class="mt">' + timeLabel(m.ts) + '</span>' + ug +
@@ -1028,8 +1028,112 @@
         '</div>' +
       '</div>';
     var mdBox = wrap.querySelector('.md');
-    if (mdBox) markBigEmoji(mdBox);
+    if (mdBox) {
+      markBigEmoji(mdBox);
+      mountImgSlots(mdBox, 'chat');
+    }
     return wrap;
+  }
+
+  /* ── 网上找图：她写 [[img:english tags]]，App 去搜一张放进来 ── */
+
+  var imgCache = {};
+  try { imgCache = JSON.parse(localStorage.getItem('xi.v1.imgcache') || '{}'); } catch (e) { imgCache = {}; }
+
+  function saveImgCache() {
+    try {
+      var keys = Object.keys(imgCache);
+      if (keys.length > 120) {
+        keys.slice(0, keys.length - 120).forEach(function (k) { delete imgCache[k]; });
+      }
+      localStorage.setItem('xi.v1.imgcache', JSON.stringify(imgCache));
+    } catch (e) { /* 满了就算 */ }
+  }
+
+  /* 先试 safebooru（二次元，强制 safe），不行再试 openverse（通用图库） */
+  async function findImage(q) {
+    if (imgCache[q]) return imgCache[q];
+
+    try {
+      var tags = 'rating:safe+' + encodeURIComponent(String(q).trim().replace(/\s+/g, '+'));
+      var raw = await ghGet('https://safebooru.org/index.php?page=dapi&s=post&q=index&json=1&limit=30&tags=' + tags);
+      var arr = JSON.parse(raw);
+      if (Array.isArray(arr) && arr.length) {
+        var pick = arr[Math.floor(Math.random() * Math.min(arr.length, 12))];
+        var u = pick.sample_url || pick.file_url || '';
+        if (u && u.charAt(0) === '/') u = 'https://safebooru.org' + u;
+        if (/^https:\/\//.test(u)) {
+          imgCache[q] = u;
+          saveImgCache();
+          return u;
+        }
+      }
+    } catch (e) { /* 换下一个源 */ }
+
+    try {
+      var j = JSON.parse(await ghGet('https://api.openverse.org/v1/images/?page_size=12&q=' +
+        encodeURIComponent(q)));
+      var list = (j && j.results) || [];
+      if (list.length) {
+        var r = list[Math.floor(Math.random() * Math.min(list.length, 8))];
+        var url = r.thumbnail || r.url;
+        if (/^https:\/\//.test(url)) {
+          imgCache[q] = url;
+          saveImgCache();
+          return url;
+        }
+      }
+    } catch (e) { /* 都没有 */ }
+
+    return '';
+  }
+
+  function mountImgSlots(root, query) {
+    var slots = root.querySelectorAll('[data-img]');
+    for (var i = 0; i < slots.length; i++) {
+      (function (el) {
+        var q = el.getAttribute('data-img');
+        findImage(q).then(function (url) {
+          if (!url) {
+            el.className = 'img-fail';
+            el.textContent = '（没找到「' + q + '」的图）';
+            return;
+          }
+          var img = document.createElement('img');
+          img.className = 'md-img';
+          img.loading = 'lazy';
+          img.referrerPolicy = 'no-referrer';
+          img.src = url;
+          img.alt = q;
+          el.replaceWith(img);
+          if (query === 'chat') scrollBottom();
+        }).catch(function () { });
+      })(slots[i]);
+    }
+  }
+
+  /* 把 [[img:xxx]] 换成占位，再由 mountImgSlots 去拉图 */
+  function renderImgSlots(html) {
+    return String(html).replace(/\[\[img[:：]([^\]]+)\]\]/g, function (m, q) {
+      return '<span class="img-slot" data-img="' + esc(String(q).trim()) + '">找图中…</span>';
+    });
+  }
+
+  var STICKERS = {
+    '开心': '😄', '得意': '😏', '无语': '😐', '委屈': '🥺', '生气': '😤',
+    '困': '😪', '震惊': '😮', '思考': '🤔', '失败': '🫠', '抱抱': '🤗',
+    '笑死': '🤣', '叹气': '😮‍💨', '害羞': '😳', '认真': '🙂',
+  };
+
+  /* 把 [[sticker:得意]] 画成一张贴纸卡 */
+  function renderStickers(html) {
+    return String(html).replace(/\[\[sticker[:：]([^\]]+)\]\]/g, function (m, name) {
+      var key = String(name).trim();
+      var emo = STICKERS[key];
+      if (!emo) return m;
+      return '<span class="sticker"><span class="st-emo">' + emo + '</span>' +
+        '<span class="st-name">' + esc(key) + '</span></span>';
+    });
   }
 
   /* 整段只有表情的，放大成「表情包」的样子；颜文字单独一档，别被字距撑散 */
@@ -2181,14 +2285,10 @@
 
         if (cur === sess) {
           addUsage(uu);
-          if (mdEl && msg.content) {
-            mdEl.innerHTML = MD.render(msg.content);
-            if (msg.reasoning && bubble) {
-              var d = document.createElement('details');
-              d.className = 'think';
-              d.innerHTML = '<summary>思考过程</summary><div class="think-body">' + esc(msg.reasoning) + '</div>';
-              bubble.insertBefore(d, bubble.firstChild);
-            }
+          if (msg.content) {
+            // 重画整条：可能被拆成多个气泡，不能只改第一个 .md
+            var fresh = msgNode(msg, sess.messages.indexOf(msg));
+            if (el && el.parentNode) el.replaceWith(fresh);
           }
           refreshHeader();
           saveCur();

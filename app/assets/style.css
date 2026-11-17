@@ -647,6 +647,51 @@ body::before {
   line-height: 1.92;
   letter-spacing: .18px;
 }
+/* 连发的气泡之间留一点空隙 */
+.msg.ai .body .bubble + .bubble { margin-top: 6px; }
+.msg.ai .body .bubble:last-of-type { margin-bottom: 0; }
+
+/* 还没吐字的时候显示「正在输入」 */
+.msg.ai .md:empty::before {
+  content: '···';
+  letter-spacing: 2px;
+  color: #7fb3e0;
+  animation: typingPulse 1.1s ease-in-out infinite;
+}
+@keyframes typingPulse {
+  0%, 100% { opacity: .25; }
+  50% { opacity: .9; }
+}
+
+/* 贴纸：表情 + 名字，做成小卡片 */
+.md .sticker {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 12px 6px;
+  margin: 4px 6px 8px 0;
+  border-radius: 16px;
+  background: linear-gradient(160deg, rgba(111, 179, 240, .16), rgba(217, 143, 184, .14));
+  border: 1px solid rgba(111, 179, 240, .3);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .18);
+}
+.md .sticker .st-emo { font-size: 34px; line-height: 1.1; }
+.md .sticker .st-name {
+  font-size: 10.5px;
+  color: #9fc4e8;
+  letter-spacing: 1px;
+}
+
+.md .img-slot {
+  display: inline-block;
+  min-width: 90px; padding: 14px 12px;
+  border-radius: 12px;
+  border: 1px dashed rgba(150, 185, 255, .35);
+  color: #9fc4e8; font-size: 12px;
+}
+.md .img-fail { font-size: 12px; color: var(--label-3); }
+
 /* 她发的表情包 */
 .msg.ai .md .md-img {
   display: block;

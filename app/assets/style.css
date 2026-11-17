@@ -616,12 +616,21 @@ body::before {
 
 .msg.ai .bubble {
   position: relative;
+  padding-left: 17px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, .94), rgba(244, 250, 255, .9));
   border: 1px solid rgba(28, 50, 107, .13);
-  border-left: 2px solid transparent;
-  border-image: linear-gradient(180deg, #4aa3e8, #d98fb8) 1;
-  border-image-slice: 0 0 0 1;
+  border-radius: 4px 16px 16px 16px;
+}
+/* 签名条：悬浮在气泡内，两端圆头，不跟圆角打架 */
+.msg.ai .bubble::before {
+  content: '';
+  position: absolute;
+  left: 6px; top: 12px; bottom: 12px;
+  width: 3px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #4aa3e8, #d98fb8);
+  opacity: .85;
 }
 .msg.ai .bubble::after {
   content: '';
@@ -690,9 +699,11 @@ body::before {
   background:
     linear-gradient(180deg, rgba(26, 46, 78, .8), rgba(13, 26, 48, .74));
   border-color: rgba(150, 185, 255, .16);
-  border-image: linear-gradient(180deg, #6fb3f0, #d98fb8) 1;
-  border-image-slice: 0 0 0 1;
   box-shadow: 0 8px 26px rgba(0, 0, 0, .34);
+}
+[data-theme="dark"] .msg.ai .bubble::before {
+  background: linear-gradient(180deg, #6fb3f0, #d98fb8);
+  opacity: .9;
 }
 [data-theme="dark"] .msg.ai .bubble::after {
   background: radial-gradient(120% 90% at 0% 0%, rgba(111, 179, 240, .12), transparent 58%);

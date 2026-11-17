@@ -25,7 +25,6 @@
     voiceMode: 'ai',
     asrModel: 'whisper-1',
     theme: 'auto',
-    visionModel: '',
     imgMode: 'original',
     searchMode: 'native',
     searchModel: 'deepseek-flash',
@@ -1762,7 +1761,6 @@
       }
       ATTS.push({ id: id, kind: 'image', name: name, preview: url, dataUrl: url, size: size });
       renderAtts();
-      maybeWarnVision();
       return;
     }
 
@@ -1820,12 +1818,7 @@
     });
   }
 
-  /* 没填视觉模型时提醒一次 */
-  function maybeWarnVision() {
-    if (S.visionModel || maybeWarnVision.done) return;
-    maybeWarnVision.done = true;
-    toast('没填「视觉模型」，图片可能被接口忽略；设置里补一个', 3800);
-  }
+  /* 带图的消息已经不再单独切模型，统一用主模型 */
 
   function draftContent() {
     var text = $('input').value.trim();
@@ -2195,7 +2188,7 @@
       var body = {
         model: nativeSearch
           ? (S.searchModel || 'deepseek-flash')
-          : ((hasImages(sess) && S.visionModel) ? S.visionModel : S.model),
+          : S.model,
         messages: buildMessages(sess),
         stream: !!S.stream,
       };
@@ -2532,7 +2525,6 @@
     $('fVoiceMode').value = S.voiceMode || 'ai';
     $('fAsr').value = S.asrModel || 'whisper-1';
     $('fTheme').value = S.theme || 'auto';
-    $('fVisionModel').value = S.visionModel || '';
     $('fImgMode').value = S.imgMode || 'original';
     $('fSearchMode').value = S.searchMode === 'off' ? 'off' : 'native';
     $('fEnvOn').checked = S.envOn !== false;
@@ -2562,7 +2554,6 @@
     S.voiceMode = $('fVoiceMode').value;
     S.asrModel = $('fAsr').value.trim() || 'whisper-1';
     S.theme = $('fTheme').value || 'auto';
-    S.visionModel = $('fVisionModel').value.trim();
     S.imgMode = $('fImgMode').value || 'original';
     S.searchMode = $('fSearchMode').value || 'native';
     S.searchModel = 'deepseek-flash';

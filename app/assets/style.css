@@ -647,6 +647,26 @@ body::before {
   line-height: 1.92;
   letter-spacing: .18px;
 }
+/* 单独一行的表情，放大当表情包用 */
+.msg.ai .md p.emoji-xl {
+  font-size: 32px;
+  line-height: 1.2;
+  text-indent: 0 !important;
+  margin: 2px 0 10px;
+  letter-spacing: 3px;
+}
+.msg.ai .md p.kao-xl {
+  font-size: 23px;
+  line-height: 1.3;
+  text-indent: 0 !important;
+  margin: 2px 0 10px;
+  letter-spacing: 0;
+  color: #a9d8ff;
+  opacity: .9;
+}
+.msg.me .md p.emoji-xl { font-size: 26px; }
+.msg.me .md p.kao-xl { font-size: 20px; }
+
 /* 段落感：段间距加大；只有接在上一段后面的段落才缩进（单句消息保持齐头） */
 .msg.ai .md p {
   margin: 0 0 13px;

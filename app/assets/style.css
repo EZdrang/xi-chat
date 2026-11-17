@@ -664,26 +664,6 @@ body::before {
 }
 
 
-.md .img-slot {
-  display: inline-block;
-  min-width: 90px; padding: 14px 12px;
-  border-radius: 12px;
-  border: 1px dashed rgba(150, 185, 255, .35);
-  color: #9fc4e8; font-size: 12px;
-}
-.md .img-fail { font-size: 12px; color: var(--label-3); }
-
-/* 她发的表情包 */
-.msg.ai .md .md-img {
-  display: block;
-  max-width: 168px;
-  max-height: 168px;
-  width: auto;
-  border-radius: 12px;
-  margin: 4px 0 8px;
-  background: rgba(150, 185, 255, .08);
-}
-.msg.ai .md .md-img[src$=".gif"] { max-width: 180px; }
 
 
 /* 段落感：段间距加大；只有接在上一段后面的段落才缩进（单句消息保持齐头） */

@@ -14,9 +14,6 @@
       return '\u0001' + (codes.length - 1) + '\u0001';
     });
     // 链接
-    s = s.replace(/!\[([^\]]*)\]\((https?:\/\/[^)\s]+|data:image\/[^)\s]+)\)/g, function (m, alt, u) {
-      return '<img class="md-img" src="' + u + '" alt="' + alt + '" loading="lazy">';
-    });
     s = s.replace(/\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/g, function (m, t, u) {
       return '<a href="' + u + '" target="_blank" rel="noreferrer">' + (t || u) + '</a>';
     });

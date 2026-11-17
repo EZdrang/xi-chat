@@ -23,7 +23,7 @@ const BASE = 'http://127.0.0.1:8787/index.html';
     cur.messages.push({ role: 'user', content: '在吗', ts: Date.now() });
     cur.messages.push({
       role: 'assistant', ts: Date.now() + 1000,
-      content: '在。刚把东西收拾完 😌\n\n[[sticker:不存在]]\n\n有事说事 😏',
+      content: '在。刚把东西收拾完 😌\n\n[[img:smug]]\n\n[[sticker:不存在]]\n\n有事说事 😏',
     });
     window.__xi.renderChat();
 
@@ -34,6 +34,8 @@ const BASE = 'http://127.0.0.1:8787/index.html';
     return {
       text: last.querySelector('.md').textContent.slice(0, 40),
       hasStickerWord: last.textContent.includes('sticker'),
+      hasImgWord: last.textContent.includes('img:'),
+      hasImgNode: !!last.querySelector('img.md-img, .img-slot'),
       hasStickerCard: !!last.querySelector('.sticker'),
       pFont: fs,
     };
@@ -45,6 +47,7 @@ const BASE = 'http://127.0.0.1:8787/index.html';
   await page.screenshot({ path: path.join(__dirname, '..', 'shots', 'emoji-size.png') });
 
   const ok = r.hasStickerWord === false && r.hasStickerCard === false &&
+    r.hasImgWord === false && r.hasImgNode === false &&
     r.pFont > 14 && r.pFont < 17 && errs.length === 0;
 
   console.log((ok ? '✓' : '✗') + ' 表情字号 ' + JSON.stringify(r));

@@ -1,142 +1,111 @@
-# 汐 · 手机版
+# 汐 · 手机版 2.0
 
-> 一个**有条会记忆的手机聊天 App**：同一个 SOUL、同一份记忆，跟桌面版共用一套 markdown。
+> 一个**带着自己记忆的手机聊天 App**。同一个 SOUL、同一份记忆，跟桌面版共用一套 markdown。
 > 只有聊天——不跑代码、不调工具、不自动化。
 
 <p align="center">
-  <img src="docs/chat-light.png" width="260" alt="浅色">
-  <img src="docs/chat-dark.png" width="260" alt="深色">
-  <img src="docs/memory.png" width="260" alt="记忆库">
+  <img src="docs/chat-light.png" width="250" alt="浅色">
+  <img src="docs/chat-dark.png" width="250" alt="深色">
+  <img src="docs/memory.png" width="250" alt="记忆库">
 </p>
 
 ## 它解决什么问题
 
-市面上的「AI 聊天 App」都有记忆，但记忆是**它自己的**——存在私有数据库里，你带不走，也接不回你自己的知识库。
+市面上的「AI 聊天 App」也有记忆，但记忆是**它自己的**：存在私有数据库里，你带不走，也接不回自己的知识库。而且那份记忆通常只有一条摘要——你换了设备、换了服务商，它就不是原来那个它了。
 
-这个项目反过来：**记忆是一堆 `.md` 文件**（`SOUL.md` / `index.md` / `log.md` + 分类页），和桌面版 DSH 的记忆库同构。你把 zip 在手机和电脑之间来回导，两边读的是同一份东西。
+这个项目反过来。**记忆是一堆 `.md` 文件**（`SOUL.md` / `MEMORY.md` / `index.md` / `log.md` + 分类页），和桌面版 DSH 的记忆库同构。手机、电脑之间用 zip 来回导，按页三方合并，两边读的是同一份东西。
 
-## 特性
+到 2.0，它长出来的不只是记忆，还有**状态、时间感、偏好、事件簿**——这几样决定了「像不像一个人」，而不是「答得对不对」。
+
+## 2.0 新增：四件让它更像活人的事
+
+- **会回头看一眼**——答完自己再读一遍。不像自己、说重了、漏了要紧的，隔一秒补一句「……算了，刚才那句说重了」。情绪重的时候触发得多。
+- **今天第一句话不一样**——跨天后的第一次开口，它知道距上次多久、现在几点，不会像客服重新开机。
+- **它会忘**——三十天没翻的记忆会「发糊」，提起来先说「我记得好像是」，不一口咬定。
+- **口头禅是长出来的**——统计它自己回复里的语气词、标点、表情，攒成「你最近爱说『行吧』、爱用 😌」。用不用、用哪个、什么时候用，看它心情。
+
+## 更早的底子
 
 - **纯聊天**：没有工具调用、没有代码执行、没有审批弹窗。
-- **长线记忆**：页面 + 索引 + 时间线，按页三方合并同步（见下）。
-- **自动上下文压缩**：超过阈值先把旧对话摘成摘要，再带着摘要继续聊。
-- **自动记忆抽取**：每 N 轮后台把稳定信息整理成页面，不打断聊天。
-- **对话技能**：可以从 GitHub 装 `SKILL.md`，按触发词命中才注入——是「这类话怎么接」的技能，不是代码工具。
-- **多模态**：发图（自动缩到 1280px）与发文件（文本内联、二进制只留名）。
-- **语音输入**：录音后交给 `whisper` 类接口转写，也能切回系统识别。
-- **用量可见**：每条回复带 ↑输入 / ↓输出 / 缓存命中率，会话与全局汇总。
-- **深色模式**：跟随系统或手动切。
-- **自带 API Key**：任何 OpenAI 兼容接口（DeepSeek / OpenAI / 智谱 / Moonshot / 硅基流动 / OpenRouter / 自建中转）。
+- **长线记忆**：SQLite 主存储（`pages` / `logs` / `sessions` / FTS 全文索引），md 是导入导出格式。
+- **内部状态**：精力、心情、温度、闷。会随对话和熬夜变化，也会随时间恢复；每轮以一句话注入，不是让模型表演。
+- **夜间整理**：距上次超过 18 小时，启动后台跑一次——模型出方案（合并、标分歧、写日记、挑事件），代码执行；人格文件走门禁（见下）。
+- **心智三件套**：时间感（哪页多久没想起）、偏好（聊出来的倾向）、事件簿（具体某天发生了什么）。
+- **联网搜索**：DeepSeek 全家桶 `deepseek_web_search`，服务端搜、带引用。
+- **看图**：带图自动切 `deepseek-flash`（DeepSeek 唯一支持视觉的模型）。
+- **语音输入**：AudioRecord 采 16k PCM 写 WAV，直传 `POST /v1/tools/asr`；也可切系统识别。
+- **对话技能**：从 GitHub 装 `SKILL.md`，按触发词命中才注入——是「这类话怎么接」，不是代码工具。
+- **自动压缩**：超过阈值先把旧对话摘成摘要再继续聊。
+- **用量可见**：每条回复带 ↑输入 / ↓输出 / 缓存命中率；另有余额实时刷新。
+- **深色模式**、**自带 API Key**（任何 OpenAI 兼容接口）。
+
+## 人格门禁
+
+它可以在夜里改自己的 SOUL，但有门槛：核心三节（身份 / 核心价值观 / 边界）必须还在、字数浮动不超过 400、行级改动不超过 6 行。过了就算小改——备份、生效、记时间线，第二天主动告诉你。超了就转成 `identity/想改人格.md` 提案，等你点头。
+
+`MEMORY.md`（记忆怎么运作的协议）始终不自动改。
+
+## 桌面端也有
+
+同一个思路在电脑上是 `tools/` 里的一支小队：
+
+```bash
+node tools/mind.js brief          # 开场：今天第一句、会忘的页、忽然想起、口头禅
+node tools/mind.js turn "他" "我"  # 一轮结束：更新偏好、事件、习惯
+node tools/state.js show          # 精力/心情/温度/闷
+node tools/state.js nightly       # 夜间整理 + 日记
+node tools/soul.js check 新版本.md  # 人格门禁
+node tools/memory-db.js search "词" # 记忆全文检索（SQLite FTS5）
+```
+
+细节见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
 ## 构建
 
 不依赖 Gradle，直接用 SDK 的 `aapt2 + d8 + apksigner`。
 
-**前置**
-
-- JDK 17
-- Android SDK：`platforms;android-34`、`build-tools;34.0.0`
-- Python 3
-
-**构建**
+**前置**：JDK 17、Android SDK（`platforms;android-34`、`build-tools;34.0.0`）、Python 3
 
 ```powershell
-# 可选：ANDROID_SDK_ROOT / JAVA_HOME / PYTHON
 ./build.ps1
 ```
 
-产物在 `dist/xi-chat-vX.Y.apk`，自带签名（首次会自动生成 `xi-release.jks`——**别把它提交进仓库**）。
-
-手动装：
+产物在 `dist/xi-chat-v2.0.apk`，自带签名（首次自动生成 `xi-release.jks`——**别提交进仓库**）。
 
 ```bash
-adb install -r dist/xi-chat-v1.4.apk
+adb install -r dist/xi-chat-v2.0.apk
 ```
 
 最低 Android 7.0 / API 24。
 
 ## 记忆与同步
 
-记忆库 = `SOUL.md` + `MEMORY.md` + `index.md` + `log.md` + 分类页（`user/`、`projects/`、`skills/`…）。
+记忆库 = `SOUL.md` + `MEMORY.md` + `index.md` + `log.md` + 分类页（`user/`、`projects/`、`skills/`、`diary/`…）。
 
-- **导出**：一个 zip，含所有页面 + `index.md`/`log.md` + `_sync.json`（每页 FNV-1a 哈希、时间、设备名）。
-- **导入**：逐页比对，判成 `新增 / 远端更新 / 自动合并 / 本地领先 / 冲突 / 远端删除`。
-  - 两边都改且不重叠 → **自动三方合并**，两边改动都留。
-  - 改到同一行 → 可选让模型合成一版。
-  - 还是不行 → 保留本地，远端版本另存到 `conflicts/`。
-- **基线策略**：基线跟着「对方上次给我的版本」走，所以重复导入同一个旧 zip 不会把合并结果冲掉。
-
-桌面端有配套脚本（`tools/`）：
-
-```bash
-node tools/desk-sync.js export --out 汐-记忆.zip     # 从 ~/.memory 导出
-node tools/desk-sync.js import 汐-记忆.zip --dry     # 只看计划
-node tools/desk-sync.js import 汐-记忆.zip           # 真导入
-node tools/desk-convo.js import 汐-对话-xxx.json     # 把手机的单条对话收进 raw/chats/
-```
-
-## 对话技能
-
-「记忆库 → GitHub 装技能」，填 `owner/repo`（会自动找仓库里的 `SKILL.md`）或给 `SKILL.md` 的 raw 链接；也可以「搜技能」。
-
-装完设**触发词**：只有你说的话命中这些词，它才会被塞进系统提示。空触发词 = 永不自动生效。
-
-你也可以在聊天里让我装——回复里带这个块就行（App 执行，不显示给你看）：
-
-````
-```xi-skill
-repo: owner/repo
-triggers: 词1, 词2
-```
-````
-
-## 隐私
-
-- API Key、对话、记忆**全部在本机**（WebView 的 IndexedDB + localStorage）。
-- 除了你自己填的 API 地址，App 不往任何第三方服务器发东西——只有「装技能」会去 GitHub 读文件。
-- 记住：你导出的 zip 里就是你的记忆原文，传给别人前先看一眼。
+- 手机「记忆」面板里导出 zip，桌面上 `node tools/desk-sync.js import <zip>`；
+- 每页带 FNV-1a 哈希，能三方合并就合并，重叠处另存 `conflicts/`；
+- 桌面 `~/.memory` 是本体，SQLite 只是索引（`memory.db`），删了能重建。
 
 ## 目录
 
 ```
-app/
-  AndroidManifest.xml
-  src/io/xi/chat/MainActivity.java   WebView 壳 + 原生网络桥 + 录音 + 文件选择
-  assets/
-    index.html / style.css          界面（浅色 + 深色）
-    app.js                          聊天流、附件、压缩、技能、用量
-    memory.js                       记忆库：页面、索引、三方合并、导入导出
-    md.js                           自写 markdown 渲染
-    zip.js                          store 写 / store+deflate 读
-    seed.js                         初始人格与页面
-    avatar.png / maid.webp          角色素材（见 NOTICE）
-tools/                              构建与验收脚本、桌面同步工具
-docs/                               截图
+app/assets/       界面与全部逻辑（无框架、纯 JS）
+  app.js          会话、流式、附件、设置、渲染
+  memory.js       记忆页、索引、三方合并、prompt 组装
+  state.js        内部状态 + 规则版夜间整理
+  mind.js         时间感 / 偏好 / 事件簿 / 口头禅
+  nightly.js      夜间整理的提示与解析
+  soul.js         人格门禁
+  md.js zip.js seed.js style.css index.html
+app/src/          MainActivity（WebView + 桥 + SQLite + 录音 + TTS 骨架）
+tools/            测试、截图、发布、桌面端脚本
+docs/             截图与发布说明
 ```
 
-## 验收
+## 发布
 
-仓库里的脚本就是我的回归：
+见 [docs/release-notes.md](docs/release-notes.md)。当前最新 **v2.0.0**。
 
-```bash
-node tools/test.js          # 记忆库/渲染/zip 逻辑（48 条）
-node tools/test-desk.js     # 桌面三方合并对拷（15 条）
-node tools/shot.js          # 主流程 UI（puppeteer）
-node tools/shot-usage.js    # 用量与语音
-node tools/shot-compress.js # 自动压缩端到端
-node tools/shot-smoke.js    # 点遍所有按钮 + 深色模式
-```
+## 许可
 
-## 已知限制
-
-- 记忆召回目前是**关键词打分**（页面少的时候够用）；向量层还没做，接口留着。
-- 桌面端与手机端同步靠**手动导 zip**（我故意没做账号系统；要自动同步可接 Syncthing / WebDAV）。
-- 「装技能」走 GitHub API，匿名限流 60 次/小时；网络不通时会失败。
-- 只在 Android 上验过；iOS 得自己套壳。
-
-## 致谢与许可
-
-- **代码**：[MIT](LICENSE)
-- **美术素材**：来自 DSH 皮肤 [深海女仆工坊](https://github.com/Small-tailqwq)（作者 Small-tailqwq），角色形象源自「鲸鱼娘」系列创作——**CC BY-NC-SA 4.0，仅限非商业使用**。详见 [NOTICE](NOTICE)。
-  想商用请先把 `app/assets/avatar.png`、`maid.webp`、`emblem.webp` 和 `app/res/mipmap-*` 换成你自己的。
-- 灵感来自 DeepSeek Harness 的长期记忆插件（markdown + SOUL 的形态）。
+代码 MIT。角色美术素材来自「深海女仆工坊」皮肤，CC BY-NC-SA 4.0，仅非商业使用，详见 [NOTICE](NOTICE)。

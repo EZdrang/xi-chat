@@ -1338,11 +1338,31 @@
     var guard = function (p) { return p && !/^(SOUL|MEMORY)\.md$/i.test(p); };
 
     (plan.merge || []).slice(0, 3).forEach(function (m) {
-      if (!guard(m.path)) return;
+      if (!m.path) return;
       var old = mem.get(m.path);
       if (!old) return;
       var nb = String(m.body || '').trim();
-      if (!nb || nb.length > 8000 || nb === String(old.body || '').trim()) return;
+      if (!nb || nb.length > 12000 || nb === String(old.body || '').trim()) return;
+
+      // 人格页单独走门禁：小改自决，大改转提案
+      if (/^SOUL\.md$/i.test(m.path) && window.XiSoul) {
+        var verdict = window.XiSoul.check(old.body, nb);
+        if (!verdict.ok) {
+          mem.upsert(window.XiSoul.proposalPage(old.body, nb, plan.soulNote || m.note, stamp));
+          mem.addLog('soul', '夜里想改人格被拦下转提案：' + verdict.why);
+          noticeSoul({ stamp: stamp, kind: 'proposal', why: verdict.why });
+          return;
+        }
+        window.XiNightly.backupPage(m.path, old.body);
+        mem.upsert({ path: m.path, body: nb });
+        mem.addLog('soul', '汐改了自己的 SOUL（小改：' + verdict.lines + ' 行 / ' +
+          verdict.delta + ' 字）' + (plan.soulNote ? '：' + String(plan.soulNote).slice(0, 80) : ''));
+        noticeSoul({ stamp: stamp, kind: 'edit', lines: verdict.lines, delta: verdict.delta, note: plan.soulNote });
+        did.soul = 1;
+        return;
+      }
+      if (/^MEMORY\.md$/i.test(m.path)) return;   // 协议不自动改
+
       window.XiNightly.backupPage(m.path, old.body);
       mem.upsert({ path: m.path, body: nb });
       did.merge++;
@@ -1376,6 +1396,28 @@
       } catch (e) { }
     }
     return did;
+  }
+
+  /* 人格被动过或她想动，都要让她主动说出来，不能悄悄发生 */
+  function noticeSoul(info) {
+    try {
+      localStorage.setItem('xi.v1.soulNotice', JSON.stringify(info));
+    } catch (e) { }
+  }
+
+  function flushSoulNotice() {
+    var raw = '';
+    try { raw = localStorage.getItem('xi.v1.soulNotice') || ''; } catch (e) { }
+    if (!raw) return;
+    var info = null;
+    try { info = JSON.parse(raw); } catch (e) { info = null; }
+    try { localStorage.removeItem('xi.v1.soulNotice'); } catch (e) { }
+    if (!info) return;
+    if (info.kind === 'edit') {
+      toast('昨晚我自己调了人格（' + info.lines + ' 行），改了什么写在时间线里', 4200);
+    } else {
+      toast('昨晚我想改人格，太冒险，写成提案了（记忆面板 → identity/想改人格.md）', 4600);
+    }
   }
 
   function renderSessions() {
@@ -3250,6 +3292,7 @@
               } catch (e) { }
             }
             if (done && window.XiState.markNight) window.XiState.markNight();
+            flushSoulNotice();
           }, 4000);
         }
       } catch (e) { }

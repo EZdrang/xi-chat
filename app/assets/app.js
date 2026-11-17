@@ -1281,6 +1281,84 @@
     }
   }
 
+  /* 夜间整理（模型版）：她出合并/分歧/日记的方案，这里只负责执行 */
+  async function runNightlyAI() {
+    if (!S.apiKey || !window.XiNightly) return false;
+    var mem = MEM;
+    var snap = window.XiState ? window.XiState.snapshot() : { energy: 50, mood: 0, warmth: 40 };
+    var src = window.XiNightly.pickPages(mem, 6);
+    if (!src.length) return false;
+
+    var prompt = window.XiNightly.buildPrompt(src, snap);
+    var model = /deepseek\.com/i.test(String(S.baseUrl || '')) ? 'deepseek-flash' : S.model;
+    var j = await postJSON(joinUrl('/chat/completions'), {
+      model: model,
+      messages: [
+        { role: 'system', content: '你是汐的记忆整理器，只输出 JSON。' },
+        { role: 'user', content: prompt },
+      ],
+      stream: false,
+      temperature: 0.3,
+    });
+
+    var txt = j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content;
+    if (!txt) return false;
+    var plan = window.XiNightly.parseJson(txt);
+
+    var did = { merge: 0, conflict: 0, archive: 0 };
+    var stamp = window.XiNightly.todayStamp();
+    var guard = function (p) { return p && !/^(SOUL|MEMORY)\.md$/i.test(p); };
+
+    (plan.merge || []).slice(0, 3).forEach(function (m) {
+      if (!guard(m.path)) return;
+      var old = mem.get(m.path);
+      if (!old) return;
+      var nb = String(m.body || '').trim();
+      if (!nb || nb.length > 8000 || nb === String(old.body || '').trim()) return;
+      window.XiNightly.backupPage(m.path, old.body);
+      mem.upsert({ path: m.path, body: nb });
+      did.merge++;
+    });
+
+    (plan.conflicts || []).slice(0, 2).forEach(function (c) {
+      if (!guard(c.path)) return;
+      var pg = mem.get(c.path);
+      if (!pg || !c.note) return;
+      window.XiNightly.backupPage(c.path, pg.body);
+      mem.upsert({ path: c.path, body: String(pg.body || '') + '\n\n> ⚠ 有分歧：' + String(c.note).slice(0, 160) });
+      did.conflict++;
+    });
+
+    (plan.archive || []).slice(0, 2).forEach(function (p) {
+      if (!guard(p)) return;
+      var pg = mem.get(p);
+      if (!pg) return;
+      mem.upsert({ path: p, salience: 3 });
+      did.archive++;
+    });
+
+    if (plan.diary) {
+      mem.upsert({
+        path: 'diary/' + stamp + '.md',
+        title: stamp + ' 日记',
+        type: 'fact',
+        salience: 3,
+        summary: String(plan.diary).replace(/\s+/g, ' ').slice(0, 60),
+        body: '## ' + stamp + '\n\n' + String(plan.diary).trim(),
+      });
+    }
+
+    mem.addLog('work', '夜里整理：合并 ' + did.merge + ' 页、标记 ' + did.conflict +
+      ' 处分歧、归档 ' + did.archive + ' 页' + (plan.note ? '（' + String(plan.note).slice(0, 60) + '）' : ''));
+    if (window.XiState) {
+      try {
+        var st = window.XiState.snapshot();
+        window.XiState.save({ lastNight: Date.now() });
+      } catch (e) { }
+    }
+    return did;
+  }
+
   function renderSessions() {
     var box = $('sessions');
     box.innerHTML = '';
@@ -3139,12 +3217,21 @@
       try {
         window.XiState.load();
         if (window.XiState.needNightly()) {
-          setTimeout(function () {
+          setTimeout(async function () {
+            var done = false;
             try {
-              var r = window.XiState.nightly(MEM);
-              console.log('[state] 整理完成', r);
-            } catch (e) { }
-          }, 2500);
+              done = await runNightlyAI();
+            } catch (e) {
+              done = false;
+            }
+            if (!done) {
+              try {
+                window.XiState.nightly(MEM);
+                done = true;
+              } catch (e) { }
+            }
+            if (done && window.XiState.markNight) window.XiState.markNight();
+          }, 4000);
         }
       } catch (e) { }
     }
@@ -3226,6 +3313,7 @@
     extractSkillDirective: extractSkillDirective,
     refreshBalance: refreshBalance,
     saveCur: saveCur, renderChat: renderChat,
+    nightly: runNightlyAI,
     get S() { return S; }, get cur() { return cur; }, get BAL() { return BAL; },
   };
 })();

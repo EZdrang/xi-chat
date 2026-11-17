@@ -176,8 +176,14 @@
     return { pages: pages.length, cleaned: cleaned };
   }
 
+  function markNight() {
+    load();
+    ST.lastNight = Date.now();
+    save();
+  }
+
   window.XiState = {
     load: load, afterTurn: afterTurn, line: line, snapshot: snapshot,
-    needNightly: needNightly, nightly: nightly, save: save,
+    needNightly: needNightly, nightly: nightly, save: save, markNight: markNight,
   };
 })();

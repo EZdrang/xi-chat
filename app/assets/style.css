@@ -663,25 +663,6 @@ body::before {
   50% { opacity: .9; }
 }
 
-/* 贴纸：表情 + 名字，做成小卡片 */
-.md .sticker {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  padding: 8px 12px 6px;
-  margin: 4px 6px 8px 0;
-  border-radius: 16px;
-  background: linear-gradient(160deg, rgba(111, 179, 240, .16), rgba(217, 143, 184, .14));
-  border: 1px solid rgba(111, 179, 240, .3);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, .18);
-}
-.md .sticker .st-emo { font-size: 34px; line-height: 1.1; }
-.md .sticker .st-name {
-  font-size: 10.5px;
-  color: #9fc4e8;
-  letter-spacing: 1px;
-}
 
 .md .img-slot {
   display: inline-block;
@@ -704,25 +685,6 @@ body::before {
 }
 .msg.ai .md .md-img[src$=".gif"] { max-width: 180px; }
 
-/* 单独一行的表情，放大当表情包用 */
-.msg.ai .md p.emoji-xl {
-  font-size: 32px;
-  line-height: 1.2;
-  text-indent: 0 !important;
-  margin: 2px 0 10px;
-  letter-spacing: 3px;
-}
-.msg.ai .md p.kao-xl {
-  font-size: 23px;
-  line-height: 1.3;
-  text-indent: 0 !important;
-  margin: 2px 0 10px;
-  letter-spacing: 0;
-  color: #a9d8ff;
-  opacity: .9;
-}
-.msg.me .md p.emoji-xl { font-size: 26px; }
-.msg.me .md p.kao-xl { font-size: 20px; }
 
 /* 段落感：段间距加大；只有接在上一段后面的段落才缩进（单句消息保持齐头） */
 .msg.ai .md p {

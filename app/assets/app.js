@@ -1018,7 +1018,7 @@
       (isMe ? '' : '<div class="ava"><img src="avatar.png" alt="汐"></div>') +
       '<div class="body">' +
         '<div class="bubble">' + think + media +
-          '<div class="md">' + renderImgSlots(renderStickers(md)) + '</div>' +
+          '<div class="md">' + renderImgSlots(stripStickers(md)) + '</div>' +
         '</div>' +
         '<div class="meta">' +
           '<span class="mt">' + timeLabel(m.ts) + '</span>' + ug +
@@ -1028,11 +1028,13 @@
         '</div>' +
       '</div>';
     var mdBox = wrap.querySelector('.md');
-    if (mdBox) {
-      markBigEmoji(mdBox);
-      mountImgSlots(mdBox, 'chat');
-    }
+    if (mdBox) mountImgSlots(mdBox, 'chat');
     return wrap;
+  }
+
+  /* 旧消息里可能还留着 [[sticker:xx]]，静默清掉，别让它露出来 */
+  function stripStickers(html) {
+    return String(html).replace(/\[\[sticker[:：][^\]]+\]\]/g, '');
   }
 
   /* ── 网上找图：她写 [[img:english tags]]，App 去搜一张放进来 ── */
@@ -1117,44 +1119,6 @@
     return String(html).replace(/\[\[img[:：]([^\]]+)\]\]/g, function (m, q) {
       return '<span class="img-slot" data-img="' + esc(String(q).trim()) + '">找图中…</span>';
     });
-  }
-
-  var STICKERS = {
-    '开心': '😄', '得意': '😏', '无语': '😐', '委屈': '🥺', '生气': '😤',
-    '困': '😪', '震惊': '😮', '思考': '🤔', '失败': '🫠', '抱抱': '🤗',
-    '笑死': '🤣', '叹气': '😮‍💨', '害羞': '😳', '认真': '🙂',
-  };
-
-  /* 把 [[sticker:得意]] 画成一张贴纸卡 */
-  function renderStickers(html) {
-    return String(html).replace(/\[\[sticker[:：]([^\]]+)\]\]/g, function (m, name) {
-      var key = String(name).trim();
-      var emo = STICKERS[key];
-      if (!emo) return m;
-      return '<span class="sticker"><span class="st-emo">' + emo + '</span>' +
-        '<span class="st-name">' + esc(key) + '</span></span>';
-    });
-  }
-
-  /* 整段只有表情的，放大成「表情包」的样子；颜文字单独一档，别被字距撑散 */
-  function emojiKind(s) {
-    var t = String(s || '').replace(/\s/g, '');
-    if (!t || t.length > 10) return '';
-    if (/[\u4e00-\u9fa5A-Za-z0-9]/.test(t)) return '';
-    try {
-      if (/\p{Extended_Pictographic}/u.test(t)) return 'emoji';
-    } catch (e) {
-      if (/[\u2600-\u27BF]|[\uD83C-\uDBFF][\uDC00-\uDFFF]/.test(t)) return 'emoji';
-    }
-    if (/^[()（）￣▽ω･´`;:ヮノ\\\/\'"~\-]+$/.test(t)) return 'kao';
-    return '';
-  }
-
-  function markBigEmoji(root) {
-    var ps = root.querySelectorAll('p');
-    for (var i = 0; i < ps.length; i++) {
-      if (emojiKind(ps[i].textContent) === 'emoji') ps[i].classList.add('emoji-xl');
-    }
   }
 
   /* 此刻的处境：时间、电量、网络、位置——让她知道你在哪、几点、什么状态 */

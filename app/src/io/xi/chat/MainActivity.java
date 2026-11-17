@@ -607,6 +607,7 @@ public class MainActivity extends Activity {
             d.execSQL("CREATE TABLE sessions(id TEXT PRIMARY KEY, title TEXT, created_at INTEGER, " +
                     "updated_at INTEGER, count INTEGER, data TEXT)");
             d.execSQL("CREATE VIRTUAL TABLE pages_fts USING fts4(path, title, body)");
+            d.execSQL("CREATE TABLE IF NOT EXISTS state(k TEXT PRIMARY KEY, v TEXT, updated_at INTEGER)");
         }
 
         @Override

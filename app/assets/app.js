@@ -2009,6 +2009,11 @@
       }
     }
 
+    // 她的内部状态：精力/心情/温度，随对话与时间变化
+    if (window.XiState) {
+      try { out.push({ role: 'system', content: window.XiState.line() }); } catch (e) { }
+    }
+
     // 兜底：保证开头是 system/user、且 user 与 assistant 交替，否则接口会 400
     function mergeInto(prev, m) {
       var a = prev.content;
@@ -2255,6 +2260,17 @@
         var uu = mapUsage(lastUsage);
         if (uu) msg.usage = uu;
         if (reason) msg.reasoning = reason;
+
+        // 这一轮把她的状态推一点
+        if (window.XiState) {
+          try {
+            var lastUser = null;
+            for (var li = sess.messages.length - 1; li >= 0; li--) {
+              if (sess.messages[li].role === 'user' && !sess.messages[li].hidden) { lastUser = sess.messages[li]; break; }
+            }
+            window.XiState.afterTurn(lastUser ? (lastUser.display || lastUser.content) : '', msg.content);
+          } catch (e) { }
+        }
 
         if (cur === sess) {
           addUsage(uu);
@@ -2542,6 +2558,11 @@
       '',
       '开场固定开销约 ' + tok(promptLen) + ' token（' + Math.round(promptLen / (S.ctxWindow * 1.6) * 100) + '%）',
     ];
+    if (window.XiState) {
+      var sn = window.XiState.snapshot();
+      rows.push('');
+      rows.push('她此刻：精力 ' + sn.energy + ' · 心情 ' + sn.mood + ' · 温度 ' + sn.warmth + ' · 闷 ' + sn.boredom);
+    }
     dialog('上下文构成', esc(rows.join('\n')), '好');
   }
 
@@ -3113,6 +3134,20 @@
   async function bootInner() {
     MEM.init();
     S = loadSettings();
+    // 内部状态：启动时按离线时长恢复，隔夜就跑一次整理
+    if (window.XiState) {
+      try {
+        window.XiState.load();
+        if (window.XiState.needNightly()) {
+          setTimeout(function () {
+            try {
+              var r = window.XiState.nightly(MEM);
+              console.log('[state] 整理完成', r);
+            } catch (e) { }
+          }, 2500);
+        }
+      } catch (e) { }
+    }
     // 旧版本留下的 duck / custom 统一归到内置；只保留「关闭」
     if (S.searchMode !== 'off') S.searchMode = 'native';
     applyTheme();

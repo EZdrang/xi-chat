@@ -1303,6 +1303,10 @@
 
     if (plan.diary) writeDiary(mem, stamp, plan.diary);
 
+    if (window.XiMind && plan.events) {
+      try { window.XiMind.addEvents(plan.events); } catch (e) { }
+    }
+
     mem.addLog('work', '夜里整理：合并 ' + did.merge + ' 页、标记 ' + did.conflict +
       ' 处分歧、归档 ' + did.archive + ' 页' + (plan.note ? '（' + String(plan.note).slice(0, 60) + '）' : ''));
     if (window.XiState) {
@@ -2069,6 +2073,25 @@
       try { out.push({ role: 'system', content: window.XiState.line() }); } catch (e) { }
     }
 
+    // 心智三件套：想起来的旧记忆、攒出来的偏好、翻到的旧事
+    if (window.XiMind) {
+      try {
+        var lastUserText = '';
+        for (var ui = sess.messages.length - 1; ui >= 0; ui--) {
+          if (sess.messages[ui].role === 'user' && !sess.messages[ui].hidden) {
+            lastUserText = sess.messages[ui].display || sess.messages[ui].content || '';
+            break;
+          }
+        }
+        var mindBits = [
+          window.XiMind.prefLine(),
+          window.XiMind.eventLine(lastUserText),
+          window.XiMind.timeLine(lastUserText, MEM),
+        ].filter(Boolean);
+        if (mindBits.length) out.push({ role: 'system', content: mindBits.join('\n') });
+      } catch (e) { }
+    }
+
     // 兜底：保证开头是 system/user、且 user 与 assistant 交替，否则接口会 400
     function mergeInto(prev, m) {
       var a = prev.content;
@@ -2324,6 +2347,11 @@
               if (sess.messages[li].role === 'user' && !sess.messages[li].hidden) { lastUser = sess.messages[li]; break; }
             }
             window.XiState.afterTurn(lastUser ? (lastUser.display || lastUser.content) : '', msg.content);
+            if (window.XiMind) {
+              var lu = lastUser ? (lastUser.display || lastUser.content) : '';
+              window.XiMind.observe(lu, msg.content);
+              window.XiMind.captureEvent(lu, msg.content);
+            }
           } catch (e) { }
         }
 

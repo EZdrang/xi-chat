@@ -608,6 +608,9 @@ public class MainActivity extends Activity {
                     "updated_at INTEGER, count INTEGER, data TEXT)");
             d.execSQL("CREATE VIRTUAL TABLE pages_fts USING fts4(path, title, body)");
             d.execSQL("CREATE TABLE IF NOT EXISTS state(k TEXT PRIMARY KEY, v TEXT, updated_at INTEGER)");
+            d.execSQL("CREATE TABLE IF NOT EXISTS recall(path TEXT PRIMARY KEY, ts INTEGER, n INTEGER)");
+            d.execSQL("CREATE TABLE IF NOT EXISTS prefs(tag TEXT PRIMARY KEY, score REAL, last_ts INTEGER)");
+            d.execSQL("CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, what TEXT, why TEXT, how TEXT, tags TEXT)");
         }
 
         @Override

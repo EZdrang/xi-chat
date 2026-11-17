@@ -1340,6 +1340,47 @@
     }
   }
 
+  /* 回头看一眼：说完了自己再读一遍，不像自己就补一句 */
+  async function selfReview(sess, msg) {
+    if (!S.apiKey) return;
+    var txt = String(msg.content || '').trim();
+    if (txt.length < 60) return;
+    var mood = window.XiState ? window.XiState.snapshot().mood : 0;
+    var chance = mood < -10 ? 0.85 : 0.25;
+    if (window.__xiForceReview) chance = 1;
+    if (Math.random() > chance) return;
+
+    try {
+      var model = /deepseek\.com/i.test(String(S.baseUrl || '')) ? 'deepseek-flash' : S.model;
+      var j = await postJSON(joinUrl('/chat/completions'), {
+        model: model,
+        messages: [
+          { role: 'system', content: '你在回头看自己刚打完的那段话。' },
+          {
+            role: 'user',
+            content: '我刚说了这段：\n\n' + txt + '\n\n' +
+              '如果它不像我、说重了、或者漏了要紧的，就用一句话补上（第一人称，像接着打字，不要解释规则）；' +
+              '没什么要补的就留空。只输出 JSON：{"revise":"..."}',
+          },
+        ],
+        stream: false,
+        temperature: 0.5,
+      });
+      var raw = j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content;
+      if (!raw) return;
+      var out = window.XiNightly ? window.XiNightly.parseJson(raw) : JSON.parse(raw);
+      var fix = String((out && out.revise) || '').trim();
+      if (!fix) return;
+
+      setTimeout(function () {
+        msg.content = txt + '\n\n' + fix;
+        if (msg.revision) msg.revision.push(fix); else msg.revision = [fix];
+        if (cur === sess) { saveCur(); renderChat(); }
+        else persistSession(sess, null);
+      }, 1400);
+    } catch (e) { }
+  }
+
   function renderSessions() {
     var box = $('sessions');
     box.innerHTML = '';
@@ -2070,7 +2111,11 @@
 
     // 她的内部状态：精力/心情/温度，随对话与时间变化
     if (window.XiState) {
-      try { out.push({ role: 'system', content: window.XiState.line() }); } catch (e) { }
+      try {
+        var dayBit = window.XiState.dayLine();
+        if (dayBit) out.push({ role: 'system', content: dayBit });
+        out.push({ role: 'system', content: window.XiState.line() });
+      } catch (e) { }
     }
 
     // 心智三件套：想起来的旧记忆、攒出来的偏好、翻到的旧事
@@ -2085,6 +2130,7 @@
         }
         var mindBits = [
           window.XiMind.prefLine(),
+          window.XiMind.habitLine(),
           window.XiMind.eventLine(lastUserText),
           window.XiMind.timeLine(lastUserText, MEM),
         ].filter(Boolean);
@@ -2175,8 +2221,7 @@
         await runChat(sess);
       }
       var hops = 0;
-      while (hops < 2 && (pendingSearch || pendingFind || pendingCtx || pendingHint)) {
-        hops++;
+      while (hops < 2 && (pendingSearch || pendingFind || pendingCtx || pendingHint)) {        hops++;
         if (pendingHint) {
           var hint = pendingHint;
           pendingHint = '';
@@ -2204,6 +2249,13 @@
     }
 
     if (S.autoExtract) setTimeout(maybeExtract, 900);
+
+    // 说完了，回头看一眼自己刚说的话
+    var lastAi = null;
+    for (var li = sess.messages.length - 1; li >= 0; li--) {
+      if (sess.messages[li].role === 'assistant') { lastAi = sess.messages[li]; break; }
+    }
+    if (lastAi) setTimeout(function () { selfReview(sess, lastAi); }, 700);
   }
 
   function setSendState(state) {
@@ -2351,6 +2403,7 @@
               var lu = lastUser ? (lastUser.display || lastUser.content) : '';
               window.XiMind.observe(lu, msg.content);
               window.XiMind.captureEvent(lu, msg.content);
+              window.XiMind.observeHabits(msg.content);
             }
           } catch (e) { }
         }
@@ -3319,7 +3372,7 @@
     extractSkillDirective: extractSkillDirective,
     refreshBalance: refreshBalance,
     saveCur: saveCur, renderChat: renderChat,
-    nightly: runNightlyAI,
+    nightly: runNightlyAI, selfReview: selfReview,
     get S() { return S; }, get cur() { return cur; }, get BAL() { return BAL; },
   };
 })();

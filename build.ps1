@@ -92,7 +92,7 @@ if (-not (Test-Path $KS)) {
         -dname "CN=Xi Chat, OU=Xi, O=Xi, L=Shanghai, C=CN"
     if ($LASTEXITCODE -ne 0) { throw 'keytool failed' }
 }
-$apk = Join-Path $Dist 'xi-chat-v1.49.apk'
+$apk = Join-Path $Dist 'xi-chat-v2.0.apk'
 & (Join-Path $BT 'apksigner.bat') sign --ks $KS --ks-pass "pass:$KS_PASS" --key-pass "pass:$KS_PASS" `
     --v1-signing-enabled true --v2-signing-enabled true `
     --out $apk (Join-Path $Build 'aligned.apk')

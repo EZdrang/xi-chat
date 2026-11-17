@@ -78,7 +78,9 @@
       var when = s.since < 0.1 ? '刚翻过' :
         s.since < 1 ? Math.round(s.since * 24) + ' 小时前' :
           Math.round(s.since) + ' 天前';
-      return '【忽然想起】' + s.p.path + '（上次想起：' + when + '）——' +
+      // 久不碰的记忆会发糊，别说得那么肯定
+      var fuzzy = s.since > 30 ? '（太久没翻，印象有点糊，别说得太肯定）' : '';
+      return '【忽然想起】' + s.p.path + '（上次想起：' + when + '）' + fuzzy + '——' +
         String(s.p.summary || s.p.title || '').slice(0, 60);
     }).join('\n');
   }
@@ -160,9 +162,40 @@
     }).join('\n');
   }
 
+  /* ── 4. 口头禅：从她自己的回复里长出来 ── */
+
+  var TICS = ['行吧', '得了', '讲真', '说实话', '说白了', '算了', '其实', '怎么说呢',
+    '你猜', '废话', '啧', '哎', '嗯嗯', '好家伙', '离谱', '别急', '至于吗', '讲道理'];
+
+  function observeHabits(aiText) {
+    var a = String(aiText || '');
+    if (a.length < 10) return;
+    var hits = [];
+    TICS.forEach(function (w) { if (a.indexOf(w) >= 0) hits.push(w); });
+    if (/——/.test(a)) hits.push('破折号');
+    if (/……/.test(a)) hits.push('省略号');
+    var emo = (a.match(/[\u{1F300}-\u{1FAFF}]/gu) || []);
+    emo.forEach(function (e) { hits.push(e); });
+
+    hits.forEach(function (k) {
+      var row = dbAll('SELECT n FROM habits WHERE k=?', [k])[0];
+      var n = (Number(row && row.n) || 0) + 1;
+      dbRun('INSERT OR REPLACE INTO habits(k,n,last_ts) VALUES(?,?,?)', [k, n, Date.now()]);
+    });
+  }
+
+  function habitLine() {
+    var rows = dbAll('SELECT k,n FROM habits WHERE n >= 3 ORDER BY n DESC LIMIT 4', []);
+    if (!rows.length) return '';
+    var words = rows.map(function (r) { return '「' + r.k + '」' + r.n + ' 次'; });
+    return '【你自己的口头禅】' + words.join('、') +
+      '。这些是你自己用出来的，接着用就行，别刻意换。';
+  }
+
   window.XiMind = {
     tagsOf: tagsOf, observe: observe, captureEvent: captureEvent, addEvents: addEvents,
     timeLine: timeLine, prefLine: prefLine, eventLine: eventLine,
+    observeHabits: observeHabits, habitLine: habitLine,
     recallMap: recallMap, markRecall: markRecall, days: days,
   };
 })();

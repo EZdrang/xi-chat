@@ -83,6 +83,7 @@
     ST.boredom = Math.min(100, ST.boredom + (a.length < 60 ? 6 : 2));
     if (u.length > 40) ST.boredom = Math.max(0, ST.boredom - 5);
     ST.lastChat = now;
+    ST.lastDay = todayKey();
     save();
   }
 
@@ -189,8 +190,39 @@
     save();
   }
 
+  function todayKey() {
+    var d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+
+  /* 今天第一句话，跟"重新开机"不一样 */
+  function dayLine() {
+    load();
+    if (!ST.lastChat) return '';
+    if (ST.lastDay === todayKey()) return '';
+    var hrs = Math.round((Date.now() - ST.lastChat) / 3600000);
+    var gap = hrs < 1 ? '不到一小时' : (hrs < 24 ? hrs + ' 小时' : Math.round(hrs / 24) + ' 天');
+    return '【这是你们今天第一次说话】距上次 ' + gap + '。' +
+      '开场可以带点自己的意思，别像客服重新开机。';
+  }
+
+  function markDay() {
+    ST.lastDay = todayKey();
+    save();
+  }
+
+  /* 供测试/修复用：直接改内部状态 */
+  function patch(obj) {
+    load();
+    Object.keys(obj || {}).forEach(function (k) {
+      if (k in ST) ST[k] = obj[k];
+    });
+    save();
+  }
+
   window.XiState = {
     load: load, afterTurn: afterTurn, line: line, snapshot: snapshot,
     needNightly: needNightly, nightly: nightly, save: save, markNight: markNight,
+    dayLine: dayLine, markDay: markDay, patch: patch,
   };
 })();

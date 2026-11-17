@@ -611,6 +611,7 @@ public class MainActivity extends Activity {
             d.execSQL("CREATE TABLE IF NOT EXISTS recall(path TEXT PRIMARY KEY, ts INTEGER, n INTEGER)");
             d.execSQL("CREATE TABLE IF NOT EXISTS prefs(tag TEXT PRIMARY KEY, score REAL, last_ts INTEGER)");
             d.execSQL("CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, what TEXT, why TEXT, how TEXT, tags TEXT)");
+            d.execSQL("CREATE TABLE IF NOT EXISTS habits(k TEXT PRIMARY KEY, n INTEGER, last_ts INTEGER)");
         }
 
         @Override

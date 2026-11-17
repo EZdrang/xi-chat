@@ -647,6 +647,18 @@ body::before {
   line-height: 1.92;
   letter-spacing: .18px;
 }
+/* 她发的表情包 */
+.msg.ai .md .md-img {
+  display: block;
+  max-width: 168px;
+  max-height: 168px;
+  width: auto;
+  border-radius: 12px;
+  margin: 4px 0 8px;
+  background: rgba(150, 185, 255, .08);
+}
+.msg.ai .md .md-img[src$=".gif"] { max-width: 180px; }
+
 /* 单独一行的表情，放大当表情包用 */
 .msg.ai .md p.emoji-xl {
   font-size: 32px;

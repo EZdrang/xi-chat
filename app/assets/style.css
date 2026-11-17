@@ -612,7 +612,115 @@ body::before {
 }
 .msg.flash .bubble { animation: flashHit 1.6s ease; border-radius: 12px; }
 
-/* 每条消息的时间 */
+/* ─────────── 汐的气泡：颜色、质感、呼吸感 ─────────── */
+
+.msg.ai .bubble {
+  position: relative;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .92), rgba(246, 250, 255, .88));
+  border: 1px solid rgba(28, 50, 107, .13);
+  border-left: 2px solid transparent;
+  border-image: linear-gradient(180deg, #4aa3e8, #d98fb8) 1;
+  border-image-slice: 0 0 0 1;
+}
+.msg.ai .bubble::after {
+  content: '';
+  position: absolute; inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(120% 90% at 0% 0%, rgba(74, 163, 232, .07), transparent 55%);
+}
+.msg.ai .md pre { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
+
+.msg.ai .md {
+  color: #1d2c4d;
+  line-height: 1.78;
+  letter-spacing: .12px;
+  font-size: 15px;
+}
+.msg.ai .md p { margin: 0 0 10px; }
+.msg.ai .md strong {
+  color: #1767b8;
+  font-weight: 700;
+  background: linear-gradient(180deg, transparent 62%, rgba(74, 163, 232, .16) 62%);
+  padding: 0 1px;
+}
+.msg.ai .md em { color: #5b4b86; font-style: normal; }
+.msg.ai .md h1, .msg.ai .md h2, .msg.ai .md h3 {
+  color: #14568f;
+  letter-spacing: 0;
+}
+.msg.ai .md h1 { font-size: 19px; }
+.msg.ai .md h2 { font-size: 17px; }
+.msg.ai .md h3 { font-size: 15.5px; }
+.msg.ai .md li::marker { color: #4aa3e8; }
+.msg.ai .md blockquote {
+  background: rgba(74, 163, 232, .07);
+  border-left: 3px solid #4aa3e8;
+  color: #26405f;
+  border-radius: 0 10px 10px 0;
+}
+.msg.ai .md code {
+  background: rgba(74, 163, 232, .1);
+  color: #14608f;
+  border-color: rgba(74, 163, 232, .22);
+}
+.msg.ai .md pre {
+  background: #0e1c30;
+  border-color: rgba(150, 185, 255, .18);
+}
+.msg.ai .md pre code { color: #cfe2f7; background: none; }
+.msg.ai .md a { color: #1767b8; border-bottom-color: rgba(23, 103, 184, .32); }
+.msg.ai .md hr {
+  border: 0; height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(28, 50, 107, .2), transparent);
+}
+
+/* 深色：底色提亮一点点，字不要纯白，强调色走青蓝 */
+[data-theme="dark"] .msg.ai .bubble {
+  background:
+    linear-gradient(180deg, rgba(26, 46, 78, .78), rgba(13, 26, 48, .72));
+  border-color: rgba(150, 185, 255, .16);
+  border-image: linear-gradient(180deg, #6fb3f0, #d98fb8) 1;
+  border-image-slice: 0 0 0 1;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, .34);
+}
+[data-theme="dark"] .msg.ai .bubble::after {
+  background: radial-gradient(120% 90% at 0% 0%, rgba(111, 179, 240, .12), transparent 58%);
+}
+[data-theme="dark"] .msg.ai .md {
+  color: #dbe6f7;
+  line-height: 1.8;
+}
+[data-theme="dark"] .msg.ai .md strong {
+  color: #a9d8ff;
+  background: linear-gradient(180deg, transparent 62%, rgba(111, 179, 240, .22) 62%);
+}
+[data-theme="dark"] .msg.ai .md em { color: #d8c6f0; }
+[data-theme="dark"] .msg.ai .md h1,
+[data-theme="dark"] .msg.ai .md h2,
+[data-theme="dark"] .msg.ai .md h3 { color: #b7ddff; }
+[data-theme="dark"] .msg.ai .md li::marker { color: #7cc0f5; }
+[data-theme="dark"] .msg.ai .md blockquote {
+  background: rgba(111, 179, 240, .1);
+  border-left-color: #7cc0f5;
+  color: #c3d6ee;
+}
+[data-theme="dark"] .msg.ai .md code {
+  background: rgba(111, 179, 240, .14);
+  color: #a9d8ff;
+  border-color: rgba(111, 179, 240, .26);
+}
+[data-theme="dark"] .msg.ai .md pre {
+  background: rgba(4, 12, 24, .68);
+  border-color: rgba(150, 185, 255, .2);
+}
+[data-theme="dark"] .msg.ai .md a { color: #9fd0f5; border-bottom-color: rgba(159, 208, 245, .35); }
+[data-theme="dark"] .msg.ai .md hr {
+  background: linear-gradient(90deg, transparent, rgba(150, 185, 255, .28), transparent);
+}
+
+
 .meta .mt {
   font-size: 11px; color: var(--label-3);
   margin-right: 8px; font-variant-numeric: tabular-nums;
